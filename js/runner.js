@@ -1,6 +1,7 @@
 
 import Game from './game.js'
 
+// all globals here to keep them out of the exported object
 let game = new Game()
 let commands = []
 let events = []
@@ -29,7 +30,7 @@ class Runner {
       events: oldEvents
     }
   }
-  pause (w) {
+  pause () {
     paused = !paused
     if (paused) {
       window.clearTimeout(timeout)

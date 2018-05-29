@@ -2,6 +2,17 @@
 import makeName from './names.js'
 import { join } from './util.js'
 
+const assert = (console ? console.assert : function () {})
+
+function split(s) {
+  s = s.trim().split(/\s+/).join(' ')
+  let i = s.indexOf(' ')
+  if (i > 0) {
+    return [s.substr(0, i), s.substr(i + 1)]
+  }
+  return [s, null]
+}
+
 class Thing {
   constructor () {
     this.parent = null
@@ -9,10 +20,30 @@ class Thing {
   place (parent, opts) {
     return parent.accept(this, opts)
   }
+  get area () {
+    let p = this.parent
+    while (p != null) {
+      if (p instanceof Area) {
+        return p
+      }
+      p = p.parent
+    }
+    return p
+  }
+  get piece () {
+    let p = this.parent
+    while (p != null) {
+      if (p instanceof Piece) {
+        return p
+      }
+      p = p.parent
+    }
+    return p
+  }
   tick () {
   }
   accept () {
-    console.log('error')
+    assert(false, 'tried to get a thing to accept something')
     return false
   }
   toString () {
@@ -23,91 +54,168 @@ class Thing {
 class Programmable extends Thing {
   constructor () {
     super()
-    this.commands = null
-    this.canDo = []
-    this.install('describe', { f: (args) => {
-      return {
-        type: 'description',
-        value: this.toString(),
+    // how many commands to run per tick
+    this.speed = 5
+    // how many incoming executions can be queued
+    this.capacity = 1
+    // queued executions
+    this.commands = []
+    // installed programs
+    this.programs = new Map()
+    // universally installed programs
+    this.install('list-programs', { f: (args) => {
+      return [...this.programs.keys()]
+    } })
+    this.install('dump-program', { f: (args) => {
+      let p = this.programs.get(args)
+      if (p) {
+        if (p.f) {
+          return 'native'
+        } else if (p.c) {
+          return 'constant: ' + p.c
+        } else if (p.macro) {
+          return 'macro: ' + p.macro
+        }
       }
-    }})
+      return 'unknown'
+    } })
+    this.install('describe', { f: (args) => {
+      return this.toString()
+    } })
   }
   install (name, func) {
-    this.canDo[name] = func
+    this.programs.set(name, func)
   }
-  command (commands) {
-    if (commands) {
-      this.commands = commands
+  command (program) {
+    if (this.commands.length < this.capacity) {
+      this.commands.push(program)
+      return true
     }
+    return false
   }
   tick () {
-    if (this.commands) {
-      let allRes = []
-      for (let c of this.commands) {
-        let func = this.canDo[c]
-        if (!func) {
+    let allRes = []
+    loop: for (let t = this.speed; t > 0 && this.commands.length > 0; t--) {
+      let line = this.commands.shift()
+      let cx = split(line)
+      let c = cx.shift()
+      // TODO - this is a standin for a programming language
+      let prog = this.programs.get(c)
+      while (true) {
+        if (!prog) {
           allRes.push({
-            type: 'don\'t understand',
-            value: c
+            typ: 'error',
+            val: 'don\'t understand ' + c
           })
-          continue
-        }
-        if (func.f) {
-          let res = func.f()
-          allRes.push(res)
-        } else if (func.macro) {
-          allRes.push({
-            type: 'not done',
-            value: func.macro
-          })
+          continue loop
+        } else if (prog.macro) {
+          line = prog.macro
+          cx = split(line)
+          c = cx.shift()
+          prog = this.programs.get(c)
         } else {
-          allRes.push({
-            type: 'can\'t do',
-            value: c
-          })
+          break
         }
       }
-      this.commands = null
-      return {
-        type: 'programmable-ran',
-        value: allRes
-      }
-    } else {
-      return {
-        type: 'programmable-bored'
+      if (prog.f) {
+        let res = prog.f(cx[0] || null)
+        if (!res) {
+          res = {
+            typ: 'res'
+          }
+        }
+        if (!res.typ) {
+          res = {
+            typ: 'res',
+            val: res
+          }
+        }
+        allRes.push(res)
+      } else if (prog.c) {
+        allRes.push({
+          typ: 'res',
+          val: prog.c
+        })
+      } else {
+        allRes.push({
+          typ: 'error',
+          val: 'can\'t do ' +c
+        })
       }
     }
+    return allRes.length > 0 ? allRes : null
   }
 }
 
 class Composite extends Programmable {
   constructor () {
     super()
+    this.slots = new Set()
     this.parts = new Map()
     this.install('tell', { f: (args) => {
-      return {
-        type: 'tell',
-        value: 'fail'
+      if (args) {
+        let cx = split(args)
+        let part = this.parts.get(cx[0])
+        if (part) {
+          if (part.command(cx[1])) {
+            return {
+              typ: 'debug',
+              val: 'command pushed to ' + cx[0]
+            }
+          } else {
+            return {
+              typ: 'error',
+              val: 'command overflow on ' + cx[0]
+            }
+          }
+        }
       }
+      return 'error'
+    } })
+    this.install('list-slots', { f: (args) => {
+      return [...this.slots]
+    } })
+    this.install('list-parts', { f: (args) => {
+      let list = {}
+      this.parts.forEach((v, k) => {
+        list[k] = v.toString()
+      })
+      return list
     } })
   }
+  addSlot (name) {
+    this.slots.add(name)
+  }
   accept (component, opts) {
-    // assert component is Component
+    assert(component instanceof Component)
+    if (!this.slots.has(opts.slot)) {
+      return false
+    }
     this.parts.set(opts.slot, component)
     component.parent = this
     return true
   }
   tick () {
     let r0 = super.tick()
-    let res = new Map()
-    this.parts.forEach(e => {
-      let o = e.tick()
-      res.set(e.name, o)
+    let res = []
+    if (r0) {
+      for (let rx of r0) {
+        rx.src = 'self'
+        res.push(rx)
+      }
+    }
+    this.parts.forEach((part, slot) => {
+      let r = part.tick()
+      if (r) {
+        for (let rx of r) {
+          rx.src = slot
+          res.push(rx)
+        }
+      }
     })
     return {
-      type: 'composite-ran',
-      self: r0,
-      parts: res
+      typ: 'res*',
+      val: res
     }
   }
   toString () {
@@ -161,7 +269,7 @@ class Area extends Thing {
     }
   }
   accept (child, opts) {
-    // assert child is Thing
+    assert(child instanceof Thing)
     this.children.add(child)
     child.parent = this
     child.x = opts.x || 0
@@ -214,6 +322,7 @@ class World extends Area {
     this.run = run
   }
   move () {
+    assert(false, 'tried to move world')
     return false
   }
   toString () {
@@ -222,33 +331,20 @@ class World extends Area {
 }
 
 class Component extends Programmable {
-  constructor (name) {
+  constructor () {
     super()
-    this.name = name
-  }
-  tick () {
-    return {
-      type: 'component-ran',
-      name: this.name
-    }
   }
   toString () {
-    return 'component ' + this.name
+    return 'component'
   }
 }
 
 class Arm extends Component {
-  constructor (name) {
-    super('arm-' + name)
+  constructor () {
+    super()
     this.install('grab', { f: (args) => {
-      console.log('grab', args)
+      return 'grabbed'
     } })
-  }
-  tick () {
-    return {
-      type: 'arm-component-ran',
-      name: this.name
-    }
   }
   toString () {
     return 'arm ' + super.toString()
@@ -256,17 +352,19 @@ class Arm extends Component {
 }
 
 class Scanner extends Component {
-  constructor (name) {
-    super('scanner-' + name)
+  constructor () {
+    super()
     this.install('scan', { f: (args) => {
-      console.log('scan', args)
+      let near = this.area.visibleTo(this.piece)
+      let seen = []
+      for (let e of near) {
+        seen.push(e.toString())
+      }
+      return {
+        typ: 'seen',
+        val: seen
+      }
     } })
-  }
-  tick () {
-    return {
-      type: 'scanner-component-ran',
-      name: this.name
-    }
   }
   toString () {
     return 'scanner ' + super.toString()
@@ -276,38 +374,48 @@ class Scanner extends Component {
 class Player extends Piece {
   constructor () {
     super()
+    // default extension points
+    this.addSlot('arm-1')
+    this.addSlot('arm-2')
+    this.addSlot('eye')
+    // events for sending back out of the game
     this.events = []
-    this.accept(new Arm('arm'), { slot: 'arm' })
-    this.accept(new Scanner('eye'), { slot: 'eye' })
-    this.install('look', { f: (args) => {
-      // TODO - delegate to scanner
-      let near = this.parent.visibleTo(this)
-      let out = []
-      for (let e of near) {
-        out.push({
-          type: 'seen',
-          value: e.toString()
-        })
-      }
-      return out
-    } })
+    // some default components
+    this.accept(new Arm(), { slot: 'arm-1' })
+    this.accept(new Scanner(), { slot: 'eye' })
+    // some default programs
+    this.install('help', { c: 'try typing list-programs' })
+    this.install('look', { macro: 'tell eye scan' })
     this.install('grab', { macro: 'tell arm-1 grab' })
   }
-  startTick (commands) {
-    if (commands) {
-      this.events.push({
-        type: 'info',
-        value: 'commands downloaded'
-      })
+  startTick (programs) {
+    if (programs) {
+      for (let p of programs) {
+        if (!this.command(p)) {
+          this.events.push({
+            typ: 'error',
+            val: `command overflow`
+          })
+        }
+      }
     }
-    this.command(commands)
   }
   tick () {
     let res = super.tick()
-    this.events.push({
-      type: 'player-ran',
-      value: res
-    })
+    // turn composite result into more user friendly things
+    // TODO - this should be in the default program of the player, not a hard coded thing
+    if (res.typ === 'res*' && res.val) {
+      for (let r of res.val) {
+        switch (r.typ) {
+        case 'seen':
+          r.src = 'self'
+          this.events.push(r)
+          break
+        default:
+          this.events.push(r)
+        }
+      }
+    }
   }
   endTick () {
     let oldEvents = this.events

@@ -33,10 +33,39 @@ class Runner {
 }
 ```
 
+## the simulation
+
+Behind the curtain is a very literal implementation of what you see. There are
+javascript objects for each of the things you can interact with, and they each
+have their own command interpreters, if they are programmable. The idea is that
+they behave like independent devices, and as such absolutely no attempt is made
+to make them efficient, they just run and whatever happens happens.
+
+There's a special object called the player, which is what receives the commands
+sent through the runner, and creates the events that are returned through the
+runner. There is no other way to interact with the world, and no way to get
+a global state view, you must go through the player object.
+
+The player is itself programmable, and is a composite thing. To interact with
+the world, you will need to send commands to the player that send commands to
+the component parts, such as arms and scanners. To get a view of the world you
+will need to aggregate the results of scanning and interacting with the world.
+
+There is a choice here, as you can program in javascript in your browser,
+allowing you to render views etc and interactively control the player. Or you
+can program the player to manage itself.
+
+With other things in the simulation there is less choice, because as soon as
+they are out of range of the player, you cannot interact with them anymore.
+There are robots, for example, that you can grab and program, but then they are
+on their own until they come back. Assuming you have programmed them to come
+back.
+
 ## TODO
 
 Almost everything.
 
 * The actual game for one thing.
 * Implement the programming language.
+* Persistence.
 * Maybe put the simulation into a worker.
