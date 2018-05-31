@@ -81,7 +81,9 @@ class Entry extends UIThing {
       e.stopPropagation()
       let v = i.value
       if (v) {
-        runner.command(v)
+        for (let c of v.split(';')) {
+          runner.command(c)
+        }
       }
       i.value = ''
     })
