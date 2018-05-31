@@ -61,6 +61,52 @@ There are robots, for example, that you can grab and program, but then they are
 on their own until they come back. Assuming you have programmed them to come
 back.
 
+## the environment
+
+You can send commands to a machine. That machine will run them, and send back
+answers. This all happens asynchronously as far as the game is concerned.
+
+Each command is a program to run, and some args, in a very basic form:
+
+`prog args are not parsed, this is all just passed on`
+
+The programs available are those installed. You can run `list-programs` to see
+them. Programs are either native, meaning they deal with the specifics of the
+"hardware", or are written in the little language these machine understand.
+
+Programs can be installed, replaced etc.
+
+The player machine is in fact a composite machine. It has a special command
+called "tell" which passes on a command to component. One component installed
+at the start is called "eye", try:
+
+`tell eye scan`
+
+The will run a command called "scan" on the eye, in the same way as you can
+directly run commands on the player. In fact, all machines in the game use the
+same core, and so run in basically the same way.
+
+## the language
+
+The programming language of the machines is a little FORTH-like thing. You can
+either compile programs and install them, or there is a script program
+pre-installed for one offs. Try:
+
+`script 1 2 +`
+
+That should return 3, hopefully. Of course it may take a moment if there is
+processing to do, but it will appear in the events view soon enough.
+
+Most programs are actually just wrappers around special, hardware specific, ops.
+The above "tell" program actually has just a couple of lines, ending with the
+"tell" op, which is specific to composite machines. Sending commands to
+components can thus be easily done within the language, e.g.:
+
+`script "scan" "eye" tell`
+
+That is actually the source of the "look" program that is pre-installed in the
+player.
+
 ## TODO
 
 Almost everything.
