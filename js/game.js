@@ -175,6 +175,7 @@ class Machine {
           })
         }
       } catch (e) {
+        this.execution = null
         allRes.push({
           typ: 'error',
           cmd: cmd,

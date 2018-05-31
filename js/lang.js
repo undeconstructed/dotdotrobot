@@ -121,6 +121,10 @@ function parse (s) {
     }
   }
 
+  if (i) {
+    throw new Error('unclosed')
+  }
+
   if (frame.parent) {
     throw new Error('unbalanced')
   }
