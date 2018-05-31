@@ -89,11 +89,10 @@ class Machine {
         }
       }
       try {
-        let stack = []
-        lang.run(app, stack, this.memory, this.ops)
+        let res = lang.run(app, { m: this.memory, ops: this.ops })
         return {
           typ: 'res',
-          val: stack.pop()
+          val: res
         }
       } catch (e) {
         return {
@@ -159,32 +158,30 @@ class Machine {
     let allRes = []
     loop: for (; this.commandsLeftThisTick > 0 && this.queue.length > 0; this.commandsLeftThisTick--) {
       let line = this.queue.shift()
-      let cx = split(line)
-      let c = cx.shift()
-      let prog = this.programs.get(c)
+      let [cmd, args] = split(line)
+      let prog = this.programs.get(cmd)
       while (prog && prog.alias) {
-        if (prog.alias) {
-          let nline = prog.alias
-          cx = split(nline)
-          c = cx.shift()
-          prog = this.programs.get(c)
-        }
+        [cmd, args] = split(prog.alias)
+        prog = this.programs.get(cmd)
       }
       if (!prog) {
         allRes.push({
           typ: 'error',
-          val: 'not found ' + c
+          cmd: cmd,
+          val: 'not found'
         })
       } else if (prog.f) {
-        let res = prog.f(this, cx[0] || null)
+        let res = prog.f(this, args)
         if (!res) {
           res = {
-            typ: 'res'
+            typ: 'res',
+            cmd: cmd
           }
         }
         if (!res.typ) {
           res = {
             typ: 'res',
+            cmd: cmd,
             val: res
           }
         }
@@ -192,26 +189,29 @@ class Machine {
       } else if (prog.c) {
         allRes.push({
           typ: 'res',
+          cmd: cmd,
           val: prog.c
         })
       } else if (prog.app) {
         try {
-          let stack = []
-          lang.run(prog.app, stack, this.memory, this.ops)
+          let res = lang.run(prog.app, { m: this.memory, ops: this.ops })
           allRes.push({
             typ: 'res',
-            val: stack.pop()
+            cmd: cmd,
+            val: res
           })
         } catch (e) {
-          return {
+          allRes.push({
             typ: 'error',
+            cmd: cmd,
             val: 'crash: ' + e
-          }
+          })
         }
       } else {
         allRes.push({
           typ: 'error',
-          val: 'can\'t do ' +c
+          cmd: cmd,
+          val: 'can\'t do'
         })
       }
     }
@@ -565,12 +565,9 @@ class Scanner1 extends Component {
     super()
     this.addOp('scan', (m, s) => {
       let near = this.area.visibleTo(this.piece)
-      for (let e of near) {
-        s.push(e.toString())
-      }
-      s.push(near.length)
+      s.push( near.join(', '))
     })
-    this.compileProgram('scan', 'scan  ;')
+    this.compileProgram('scan', 'scan ;')
   }
   toString () {
     return 'scanner ' + super.toString()

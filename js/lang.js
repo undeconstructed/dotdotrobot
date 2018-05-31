@@ -192,15 +192,18 @@ const ops = {
   }
 }
 
-function run (p, s, m, cOps) {
-  cOps = cOps || {}
+function run (p, opts) {
+  let s = opts.s || []
+  let m = opts.m || {}
+  let cOps = opts.ops || {}
+
   let frame = { f: p['main'], n: 0, parent: null }
   while (true) {
     let c = frame.f[frame.n++]
     if (c.t === END) {
       frame = frame.parent
       if (!frame) {
-        return
+        return s.pop()
       }
     } else if (c.t === IF) {
       let b = s.pop()
@@ -230,6 +233,8 @@ function run (p, s, m, cOps) {
       s.push(c.v)
     }
   }
+  console.assert(false, 'reached end of run!')
+  return s.pop()
 }
 
 // let s = []
