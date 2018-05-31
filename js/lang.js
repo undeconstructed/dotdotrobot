@@ -193,17 +193,22 @@ const ops = {
 }
 
 function run (p, opts) {
-  let s = opts.s || []
-  let m = opts.m || {}
-  let cOps = opts.ops || {}
+  p = p || opts.p
+  let s = opts.s = opts.s || []
+  let m = opts.m = opts.m || {}
+  let cOps = opts.ops = opts.ops || {}
+  let runFor = opts.runFor = opts.runFor || -1
+  let frame = opts.frame || ({ f: p['main'], n: 0, parent: null })
 
-  let frame = { f: p['main'], n: 0, parent: null }
+  let opsRun = 0
+  let paused = false
+
   while (true) {
     let c = frame.f[frame.n++]
     if (c.t === END) {
       frame = frame.parent
       if (!frame) {
-        return s.pop()
+        break
       }
     } else if (c.t === IF) {
       let b = s.pop()
@@ -223,7 +228,8 @@ function run (p, opts) {
         } else {
           let sub = p[c.v]
           if (!sub) {
-            return 'ERROR 2'
+            s.push('NOSUB ' + c.v)
+            break
           }
           // console.log('enter sub', c.v)
           frame = { f: sub, n: 0, parent: frame }
@@ -232,9 +238,22 @@ function run (p, opts) {
     } else {
       s.push(c.v)
     }
+    opsRun++
+    if (runFor > 0 && opsRun > runFor) {
+      paused = true
+      break
+    }
   }
-  console.assert(false, 'reached end of run!')
-  return s.pop()
+
+  if (!paused) {
+    opts.res = s.pop()
+  } else {
+    opts.frame = frame
+  }
+  opts.used = opsRun
+  opts.paused = paused
+
+  return opts
 }
 
 // let s = []

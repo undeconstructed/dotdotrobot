@@ -53,9 +53,9 @@ class Thing {
 }
 
 class Machine {
-  constructor (speed, maxPrograms, queueSize, memorySize) {
-    this.commandsPerTick = speed
-    this.commandsLeftThisTick = 0
+  constructor (cps, maxPrograms, queueSize, memorySize) {
+    this.cps = cps
+    this.cp0 = 0
     this.maxPrograms = maxPrograms
     this.programs = new Map()
     this.memorySize = memorySize
@@ -63,6 +63,7 @@ class Machine {
     this.queueSize = queueSize
     this.queue = []
     this.ops = {}
+    this.execution = null
     this.installProgram('install', { f: (m, args) => {
       let [name, src] = split(args)
       let app = null
@@ -89,7 +90,8 @@ class Machine {
         }
       }
       try {
-        let res = lang.run(app, { m: this.memory, ops: this.ops })
+        let { res, used } = lang.run(app, { m: this.memory, ops: this.ops, runFor: this.cp0 })
+        this.cp0 -= used
         return {
           typ: 'res',
           val: res
@@ -152,67 +154,99 @@ class Machine {
     return value
   }
   tick () {
-    this.commandsLeftThisTick = this.commandsPerTick
+    this.cp0 = this.cps
   }
   execute () {
     let allRes = []
-    loop: for (; this.commandsLeftThisTick > 0 && this.queue.length > 0; this.commandsLeftThisTick--) {
-      let line = this.queue.shift()
-      let [cmd, args] = split(line)
-      let prog = this.programs.get(cmd)
-      while (prog && prog.alias) {
-        [cmd, args] = split(prog.alias)
-        prog = this.programs.get(cmd)
-      }
-      if (!prog) {
-        allRes.push({
-          typ: 'error',
-          cmd: cmd,
-          val: 'not found'
-        })
-      } else if (prog.f) {
-        let res = prog.f(this, args)
-        if (!res) {
-          res = {
-            typ: 'res',
-            cmd: cmd
-          }
-        }
-        if (!res.typ) {
-          res = {
-            typ: 'res',
-            cmd: cmd,
-            val: res
-          }
-        }
-        allRes.push(res)
-      } else if (prog.c) {
-        allRes.push({
-          typ: 'res',
-          cmd: cmd,
-          val: prog.c
-        })
-      } else if (prog.app) {
-        try {
-          let res = lang.run(prog.app, { m: this.memory, ops: this.ops })
+    if (this.execution) {
+      let ex = this.execution
+      ex.runFor = this.cp0
+      try {
+        let { res, used } = lang.run(null, ex)
+        this.cp0 -= used
+        if (res.paused) {
+          this.execution = res
+        } else {
+          this.execution = null
           allRes.push({
             typ: 'res',
             cmd: cmd,
             val: res
           })
-        } catch (e) {
+        }
+      } catch (e) {
+        allRes.push({
+          typ: 'error',
+          cmd: cmd,
+          val: 'crash: ' + e
+        })
+      }
+    }
+    if (!this.execution) {
+      loop: for (; this.cp0 > 0 && this.queue.length > 0; this.cp0--) {
+        let line = this.queue.shift()
+        let [cmd, args] = split(line)
+        let prog = this.programs.get(cmd)
+        while (prog && prog.alias) {
+          [cmd, args] = split(prog.alias)
+          prog = this.programs.get(cmd)
+        }
+        if (!prog) {
           allRes.push({
             typ: 'error',
             cmd: cmd,
-            val: 'crash: ' + e
+            val: 'not found'
+          })
+        } else if (prog.f) {
+          let res = prog.f(this, args)
+          this.cp0 -= 5
+          if (!res) {
+            res = {
+              typ: 'res',
+              cmd: cmd
+            }
+          }
+          if (!res.typ) {
+            res = {
+              typ: 'res',
+              cmd: cmd,
+              val: res
+            }
+          }
+          allRes.push(res)
+        } else if (prog.c) {
+          allRes.push({
+            typ: 'res',
+            cmd: cmd,
+            val: prog.c
+          })
+        } else if (prog.app) {
+          try {
+            let { res, used } = lang.run(prog.app, { m: this.memory, ops: this.ops, runFor: this.cp0 })
+            this.cp0 -= used
+            if (res.paused) {
+              this.execution = res
+            } else {
+              allRes.push({
+                typ: 'res',
+                cmd: cmd,
+                val: res
+              })
+            }
+          } catch (e) {
+            allRes.push({
+              typ: 'error',
+              cmd: cmd,
+              val: 'crash: ' + e
+            })
+          }
+        } else {
+          allRes.push({
+            typ: 'error',
+            cmd: cmd,
+            val: 'can\'t do'
           })
         }
-      } else {
-        allRes.push({
-          typ: 'error',
-          cmd: cmd,
-          val: 'can\'t do'
-        })
       }
     }
     return allRes.length > 0 ? allRes : null
@@ -223,7 +257,7 @@ class Programmable extends Thing {
   constructor () {
     super()
     // this thing is the actual computer
-    this.machine = new Machine(5, 20, 10, 10)
+    this.machine = new Machine(50, 20, 10, 10)
     // universally installed programs
     this.addOp('log', (m, s) => {
       console.log('log', s.pop())
