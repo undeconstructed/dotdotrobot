@@ -1,37 +1,50 @@
 
 // docker run -it --rm -v $PWD:/js node /usr/local/bin/node /js/lang.js
 
-const STRING = Symbol('s')
-const NUMBER = Symbol('n')
-const WORD = Symbol('w')
-const DEF = Symbol('d')
+const STRING = Symbol('string')
+const NUMBER = Symbol('number')
+const WORD = Symbol('word')
+const DEF = Symbol('def`')
+const IF = Symbol('if')
 const END = Symbol('end')
 
 function parse (s) {
-  s += ' '
-
   let apps = {}
-  let main = []
-  apps['main'] = main
 
-  let subn = null
-  let sub = null
+  function newFrame (name, parent) {
+    let isif = name === 'if'
+    if (isif) {
+      name = parent.name + '_if_' + parent.ifs++
+    }
+    let symbols = []
+    apps[name] = symbols
+    return {
+      name: name,
+      isif: isif,
+      parent: parent,
+      ifs: 0,
+      symbols: symbols
+    }
+  }
 
-  let o = main
+  let frame = newFrame('main', null)
+
   let n = ''
   let i = null
 
   for (let c of s) {
     if (!i) {
-      if (sub && c === ';') {
-        apps[subn] = sub
-        sub = null
-        o = main
-      } else if (!sub && c === ':') {
+      if (c === ';') {
+        frame.symbols.push({ t: END })
+        if (frame.parent) {
+          frame = frame.parent
+        } else {
+          // hopefully this is end of the program
+          break
+        }
+      } else if (c === ':') {
         i = DEF
-        subn = ''
-        sub = []
-        o = sub
+        n = ''
       } else if (c >= '0' && c <= '9') {
         i = NUMBER
         n = c
@@ -47,7 +60,7 @@ function parse (s) {
       switch (i) {
       case STRING:
         if (c === '"') {
-          o.push({
+          frame.symbols.push({
             t: i,
             v: n
           })
@@ -58,7 +71,7 @@ function parse (s) {
         break
       case NUMBER:
         if (c === ' ') {
-          o.push({
+          frame.symbols.push({
             t: i,
             v: n - 0
           })
@@ -66,35 +79,46 @@ function parse (s) {
         } else if (c >= '0' && c <= '9') {
           n += c
         } else {
-          throw new Error('invalid number ' + c)
+          throw new Error('invalid number char ' + c)
         }
         break
       case WORD:
         if (c === ' ') {
-          o.push({
-            t: i,
-            v: n
-          })
+          if (n === 'if') {
+            let nf = newFrame('if', frame)
+            frame.symbols.push({
+              t: IF,
+              v: nf.name
+            })
+            frame = nf
+          } else {
+            frame.symbols.push({
+              t: i,
+              v: n
+            })
+          }
           i = null
-        } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || (c === '-')) {
-          n += c
         } else {
-          throw new Error('invalid word ' + c)
+          n += c
         }
         break
       case DEF:
         if (c === ' ') {
+          let nf = newFrame(n, frame)
+          frame = nf
           i = null
-        } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || (c === '-')) {
-          subn += c
         } else {
-          throw new Error('invalid name ' + c)
+          n += c
         }
         break
       }
     }
   }
-  main.push({ t: END })
+
+  if (frame.parent) {
+    throw new Error('unbalanced')
+  }
+
   return apps
 }
 
@@ -114,6 +138,30 @@ const ops = {
   '/': (m, s) => {
     let [b, a] = [s.pop(), s.pop()]
     s.push(a / b)
+  },
+  '=': (m, s) => {
+    let [b, a] = [s.pop(), s.pop()]
+    s.push(a == b)
+  },
+  '>': (m, s) => {
+    let [b, a] = [s.pop(), s.pop()]
+    s.push(a > b)
+  },
+  '>=': (m, s) => {
+    let [b, a] = [s.pop(), s.pop()]
+    s.push(a >= b)
+  },
+  '<': (m, s) => {
+    let [b, a] = [s.pop(), s.pop()]
+    s.push(a < b)
+  },
+  '<=': (m, s) => {
+    let [b, a] = [s.pop(), s.pop()]
+    s.push(a <= b)
+  },
+  '!=': (m, s) => {
+    let [b, a] = [s.pop(), s.pop()]
+    s.push(a != b)
   },
   'drop': (m, s) => {
     s.pop()
@@ -139,12 +187,21 @@ const ops = {
 }
 
 function run (p, s, m) {
-  let calls = []
-  let frame = { f: p['main'], n: 0 }
+  let frame = { f: p['main'], n: 0, parent: null }
   while (true) {
     let c = frame.f[frame.n++]
     if (c.t === END) {
-      return s
+      frame = frame.parent
+      if (!frame) {
+        return
+      }
+    } else if (c.t === IF) {
+      let b = s.pop()
+      if (b) {
+        let sub = p[c.v]
+        // console.log('enter if', c.v)
+        frame = { f: sub, n: 0, parent: frame }
+      }
     } else if (c.t === WORD) {
       let op = ops[c.v]
       if (op) {
@@ -154,27 +211,23 @@ function run (p, s, m) {
         if (!sub) {
           return 'ERROR 2'
         }
-        calls.push(frame)
         // console.log('enter sub', c.v)
-        frame = { f: sub, n: 0 }
-        continue
+        frame = { f: sub, n: 0, parent: frame }
       }
     } else {
       s.push(c.v)
-    }
-    if (frame.n === frame.f.length) {
-      frame = calls.pop()
-      // console.log('leave sub')
     }
   }
 }
 
 let s = []
 let m = {}
-let source = ':add1 1 + ; 3 4 + 2 - add1 add1 add1 "ok, that\'s it" dup "note" store drop print'
+// let source = ':add1 1 + ; 3 4 + 2 - add1 add1 add1 "ok, that\'s it" dup "note" store drop print ;'
+// let source = '1 if "true" print ; 0 if "false" print ; ;'
+let source = ':add1_if_not_0 dup 0 != if 1 + ; ; 0 add1_if_not_0 print 5 add1_if_not_0 print ;'
 
 let p = parse(source)
-// console.log('program', p)
+console.log('program', p)
 let r = run (p, s, m)
-// console.log('stack', s)
-// console.log('memory', m)
+console.log('stack', s)
+console.log('memory', m)
