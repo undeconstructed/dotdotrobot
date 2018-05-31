@@ -103,10 +103,12 @@ body {
 
 #counter {
   background-color: gray;
-  position: absolute;
+  position: fixed;
   bottom: 5px;
   right: 5px;
   padding: 5px;
+  border: 1px solid black;
+  border-radius: 2px;
 }
 #counter .n {
 }
@@ -115,7 +117,8 @@ body {
   color: red;
 }
 
-#state, #events {
+#state, #events, #history {
+  border-radius: 5px;
   background-color: gray;
   padding: 5px;
   white-space: pre;
@@ -123,19 +126,21 @@ body {
   overflow: auto;
 }
 
-#events ul {
+#events ul, #history ul {
   list-style-type: none;
   padding: 0;
   margin: 0;
 }
 
 #buttons {
+  border-radius: 5px;
   background-color: gray;
   padding: 5px;
 }
 
 #entry {
-  border: 2px solid black;
+  border-radius: 5px;
+  border: 1px solid black;
   padding: 5px;
 }
 

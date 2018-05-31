@@ -1,6 +1,7 @@
 
 import makeName from './names.js'
 import { join } from './util.js'
+import * as lang from './lang.js'
 
 const assert = (console ? console.assert : function () {})
 
@@ -58,13 +59,56 @@ class Machine {
     this.maxPrograms = maxPrograms
     this.programs = new Map()
     this.memorySize = memorySize
-    this.memory = new Map()
+    this.memory = {}
     this.queueSize = queueSize
     this.queue = []
+    this.ops = {}
+    this.installProgram('install', { f: (m, args) => {
+      let [name, src] = split(args)
+      let app = null
+      try {
+        app = lang.parse(src)
+      } catch (e) {
+        return {
+          typ: 'error',
+          val: 'can\'t compile: ' + e
+        }
+      }
+      this.installProgram(name, { app, src })
+    } })
+    this.installProgram('script', { f: (m, args) => {
+      // this is a dynamicly inputted program
+      let src = args
+      let app = null
+      try {
+        app = lang.parse(src)
+      } catch (e) {
+        return {
+          typ: 'error',
+          val: 'can\'t compile: ' + e
+        }
+      }
+      try {
+        let stack = []
+        lang.run(app, stack, this.memory, this.ops)
+        return {
+          typ: 'res',
+          val: stack.pop()
+        }
+      } catch (e) {
+        return {
+          typ: 'error',
+          val: 'crash: ' + e
+        }
+      }
+    }})
   }
-  installProgram (name, func) {
+  addOp (name, func) {
+    this.ops[name] = func
+  }
+  installProgram (name, prorgam) {
     if (this.programs.size < this.maxPrograms) {
-      this.programs.set(name, func)
+      this.programs.set(name, prorgam)
       return true
     }
     return false
@@ -82,8 +126,10 @@ class Machine {
         return 'native'
       } else if (p.c) {
         return 'constant: ' + p.c
-      } else if (p.macro) {
-        return 'macro: ' + p.macro
+      } else if (p.alias) {
+        return 'alias: ' + p.alias
+      } else if (p.app) {
+        return 'app: ' + (p.src || p.app)
       }
     }
     return 'unknown'
@@ -96,14 +142,14 @@ class Machine {
     return false
   }
   setVariable (name, value) {
-    this.memory.set(name, value)
+    this.memory[name] = value
   }
   getVariable (name) {
-    return this.memory.get(name)
+    return this.memory[name]
   }
   takeVariable (name) {
-    let value = this.memory.get(name)
-    this.memory.delete(name)
+    let value = this.memory[name]
+    delete this.memory[name]
     return value
   }
   tick () {
@@ -115,25 +161,21 @@ class Machine {
       let line = this.queue.shift()
       let cx = split(line)
       let c = cx.shift()
-      // TODO - this is a standin for a programming language
       let prog = this.programs.get(c)
-      while (true) {
-        if (!prog) {
-          allRes.push({
-            typ: 'error',
-            val: 'don\'t understand ' + c
-          })
-          continue loop
-        } else if (prog.macro) {
-          line = prog.macro
-          cx = split(line)
+      while (prog && prog.alias) {
+        if (prog.alias) {
+          let nline = prog.alias
+          cx = split(nline)
           c = cx.shift()
           prog = this.programs.get(c)
-        } else {
-          break
         }
       }
-      if (prog.f) {
+      if (!prog) {
+        allRes.push({
+          typ: 'error',
+          val: 'not found ' + c
+        })
+      } else if (prog.f) {
         let res = prog.f(this, cx[0] || null)
         if (!res) {
           res = {
@@ -152,6 +194,20 @@ class Machine {
           typ: 'res',
           val: prog.c
         })
+      } else if (prog.app) {
+        try {
+          let stack = []
+          lang.run(prog.app, stack, this.memory, this.ops)
+          allRes.push({
+            typ: 'res',
+            val: stack.pop()
+          })
+        } catch (e) {
+          return {
+            typ: 'error',
+            val: 'crash: ' + e
+          }
+        }
       } else {
         allRes.push({
           typ: 'error',
@@ -167,8 +223,11 @@ class Programmable extends Thing {
   constructor () {
     super()
     // this thing is the actual computer
-    this.machine = new Machine(5, 10, 10, 10)
+    this.machine = new Machine(5, 20, 10, 10)
     // universally installed programs
+    this.addOp('log', (m, s) => {
+      console.log('log', s.pop())
+    })
     this.installProgram('list-programs', { f: (m, args) => {
       return m.listPrograms()
     } })
@@ -179,8 +238,14 @@ class Programmable extends Thing {
       return this.toString()
     } })
   }
-  installProgram (name, func) {
-    this.machine.installProgram(name, func)
+  addOp (name, func) {
+    this.machine.addOp(name, func)
+  }
+  compileProgram (name, src) {
+    this.machine.installProgram(name, { src: src, app: lang.parse(src) })
+  }
+  installProgram (name, prorgam) {
+    this.machine.installProgram(name, prorgam)
   }
   command (command) {
     return this.machine.enqueue(command)
@@ -196,6 +261,21 @@ class Composite extends Programmable {
     super()
     this.slots = new Set()
     this.parts = new Map()
+    // tell as an op
+    this.addOp('tell', (m, s) => {
+      let [tgt, src] = [s.pop(), s.pop()]
+      let part = this.parts.get(tgt)
+      if (part) {
+        if (part.command(src)) {
+          s.push('ok')
+        } else {
+          s.push('overflow')
+        }
+      } else {
+        s.push('no part')
+      }
+    })
+    // tell as a native program
     this.installProgram('tell', { f: (m, args) => {
       if (args) {
         let cx = split(args)
@@ -265,8 +345,9 @@ class Composite extends Programmable {
         this.machine.execute()
         return null
       }
+      return res
     }
-    return res
+    return null
   }
   toString () {
     if (this.parts.size > 0) {
@@ -381,44 +462,49 @@ class Component extends Programmable {
   }
 }
 
-class Arm extends Component {
+class Arm1 extends Component {
   constructor () {
     super()
     this.howLongToGrab = 3
     this.grabbing = 0
     this.holding = null
-    this.installProgram('grab', { f: (m, args) => {
+    this.addOp('grab', (m, s) => {
       if (this.holding) {
-        return 'already holding!'
+        s.push('already holding!')
+        return
       }
       if (this.grabbing === 0) {
         this.grabbing = this.howLongToGrab
-        return 'grabbing...'
+        s.push('grabbing...')
+        return
       }
-      return 'already grabbing!'
-    } })
-    this.installProgram('ongrab', { f: (m, args) => {
-      return 'grabbed ' + this.holding
-    } })
-    this.installProgram('onmiss', { f: (m, args) => {
-      return 'missed!'
-    } })
-    this.installProgram('program' , { f: (m, args) => {
-      if (this.holding) {
-        this.holding.installProgram('idle', { macro: 'doodle' })
-        return 'programmed'
-      }
-      return 'not now'
-    }})
-    this.installProgram('release', { f: (m, args) => {
+      s.push('already grabbing!')
+    })
+    this.addOp('release', (m, s) => {
       // let owner = this.piece
       if (this.holding) {
         this.holding.move(this.area, { x: this.holding.x, y: this.holding.y })
-        return 'released'
+        s.push('released')
       } else {
-        return 'not holding anything!'
+        s.puhs('not holding anything!')
       }
-    } })
+    })
+    this.addOp('holding', (m, s) => {
+      s.push(this.holding.toString())
+    })
+    this.addOp('program', (m, s) => {
+      if (this.holding) {
+        this.holding.installProgram('idle', { alias: 'doodle' })
+        s.push('programmed')
+        return
+      }
+      s.push('not now')
+    })
+    this.compileProgram('grab', 'grab ;')
+    this.compileProgram('ongrab', 'holding ;')
+    this.compileProgram('onmiss', '"missed!" ; ')
+    this.compileProgram('program' , 'program ;')
+    this.compileProgram('release', 'release ;')
   }
   command (command) {
     if (this.grabbing > 0) {
@@ -474,20 +560,17 @@ class Arm extends Component {
   }
 }
 
-class Scanner extends Component {
+class Scanner1 extends Component {
   constructor () {
     super()
-    this.installProgram('scan', { f: (m, args) => {
+    this.addOp('scan', (m, s) => {
       let near = this.area.visibleTo(this.piece)
-      let seen = []
       for (let e of near) {
-        seen.push(e.toString())
+        s.push(e.toString())
       }
-      return {
-        typ: 'res',
-        val: seen
-      }
-    } })
+      s.push(near.length)
+    })
+    this.compileProgram('scan', 'scan  ;')
   }
   toString () {
     return 'scanner ' + super.toString()
@@ -504,12 +587,13 @@ class Player extends Piece {
     // events for sending back out of the game
     this.events = []
     // some default components
-    this.accept(new Arm(), { slot: 'arm-1' })
-    this.accept(new Scanner(), { slot: 'eye' })
+    this.accept(new Arm1(), { slot: 'arm-1' })
+    this.accept(new Scanner1(), { slot: 'eye' })
     // some default programs
-    this.installProgram('help', { c: 'try typing list-programs' })
-    this.installProgram('look', { macro: 'tell eye scan' })
-    this.installProgram('grab', { macro: 'tell arm-1 grab' })
+    this.compileProgram('sample', '1 2 + ;')
+    this.compileProgram('help', '"try typing list-programs" ;"')
+    this.compileProgram('look', '"scan" "eye" tell ;')
+    this.compileProgram('grab', '"grab" "arm-1" tell ;')
     this.installProgram('compose', { f: (m, args) => {
       let res = m.getVariable('res')
       // turn composite result into more user friendly things
@@ -530,10 +614,10 @@ class Player extends Piece {
       }
     }})
   }
-  startTick (programs) {
-    if (programs) {
-      for (let p of programs) {
-        if (!this.command(p)) {
+  startTick (commands) {
+    if (commands) {
+      for (let c of commands) {
+        if (!this.command(c)) {
           this.events.push({
             typ: 'error',
             val: `command overflow`
@@ -547,7 +631,7 @@ class Player extends Piece {
     if (res) {
       // if no compose program was installed
       for (let r of res) {
-        events.push(r)
+        this.events.push(r)
       }
     }
   }
@@ -566,13 +650,11 @@ class Player extends Piece {
   }
 }
 
-class Robot extends Piece {
+class Robot1 extends Piece {
   constructor (name) {
     super()
     this.name = name
-    this.installProgram('doodle', { f: (m, args) => {
-      console.log('doodling')
-    } })
+    this.compileProgram('doodle', '"doodling" log')
   }
   setName (name) {
     this.name = name
@@ -594,7 +676,7 @@ class Run {
     this.world = new World(this, 100, 100)
     this.player = new Player()
     this.player.place(this.world, { x: 10, y: 20 })
-    let r1 = new Robot(makeName())
+    let r1 = new Robot1(makeName())
     r1.place(this.world, { x: 10, y: 20 })
   }
   accept () {

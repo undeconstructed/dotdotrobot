@@ -63,6 +63,7 @@ class Buttons extends UIThing {
     let b0 = document.createElement('button')
     b0.textContent = tag
     b0.addEventListener('click', e => {
+      history.add({ n: new Date(), line: cmd })
       runner.command(cmd)
     })
     this.box.appendChild(b0)
@@ -79,11 +80,10 @@ class Entry extends UIThing {
     form.addEventListener('submit', e => {
       e.preventDefault()
       e.stopPropagation()
-      let v = i.value
-      if (v) {
-        for (let c of v.split(';')) {
-          runner.command(c)
-        }
+      let line = i.value
+      if (line) {
+        runner.command(line)
+        history.add({ n: new Date(), line: line })
       }
       i.value = ''
     })
@@ -95,6 +95,8 @@ class Entry extends UIThing {
 }
 
 let entry = new Entry(document.getElementById('entry'))
+
+let history = new Console(document.getElementById('history'))
 
 let boxN = document.querySelector('#counter .n')
 

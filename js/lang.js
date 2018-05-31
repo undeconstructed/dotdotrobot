@@ -9,6 +9,11 @@ const IF = Symbol('if')
 const END = Symbol('end')
 
 function parse (s) {
+  s = s.trimRight()
+  if (!s.endsWith(';')) {
+    s += ' ; '
+  }
+
   let apps = {}
 
   function newFrame (name, parent) {
@@ -65,6 +70,7 @@ function parse (s) {
             v: n
           })
           i = null
+        } else if (c === '\\') {
         } else {
           n += c
         }
@@ -186,7 +192,8 @@ const ops = {
   }
 }
 
-function run (p, s, m) {
+function run (p, s, m, cOps) {
+  cOps = cOps || {}
   let frame = { f: p['main'], n: 0, parent: null }
   while (true) {
     let c = frame.f[frame.n++]
@@ -207,12 +214,17 @@ function run (p, s, m) {
       if (op) {
         op(m, s)
       } else {
-        let sub = p[c.v]
-        if (!sub) {
-          return 'ERROR 2'
+        op = cOps[c.v]
+        if (op) {
+          op(m, s)
+        } else {
+          let sub = p[c.v]
+          if (!sub) {
+            return 'ERROR 2'
+          }
+          // console.log('enter sub', c.v)
+          frame = { f: sub, n: 0, parent: frame }
         }
-        // console.log('enter sub', c.v)
-        frame = { f: sub, n: 0, parent: frame }
       }
     } else {
       s.push(c.v)
@@ -220,14 +232,16 @@ function run (p, s, m) {
   }
 }
 
-let s = []
-let m = {}
-// let source = ':add1 1 + ; 3 4 + 2 - add1 add1 add1 "ok, that\'s it" dup "note" store drop print ;'
-// let source = '1 if "true" print ; 0 if "false" print ; ;'
-let source = ':add1_if_not_0 dup 0 != if 1 + ; ; 0 add1_if_not_0 print 5 add1_if_not_0 print ;'
+// let s = []
+// let m = {}
+// // let source = ':add1 1 + ; 3 4 + 2 - add1 add1 add1 "ok, that\'s it" dup "note" store drop print ;'
+// // let source = '1 if "true" print ; 0 if "false" print ; ;'
+// let source = ':add1_if_not_0 dup 0 != if 1 + ; ; 0 add1_if_not_0 print 5 add1_if_not_0 print ;'
+//
+// let p = parse(source)
+// console.log('program', p)
+// let r = run (p, s, m)
+// console.log('stack', s)
+// console.log('memory', m)
 
-let p = parse(source)
-console.log('program', p)
-let r = run (p, s, m)
-console.log('stack', s)
-console.log('memory', m)
+export { parse, run }
