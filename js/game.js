@@ -159,98 +159,104 @@ class Machine {
   execute () {
     let allRes = []
     if (this.execution) {
-      let ex = this.execution
-      ex.runFor = this.cp0
-      try {
-        let { res, used } = lang.run(null, ex)
-        this.cp0 -= used
-        if (res.paused) {
-          this.execution = res
-        } else {
-          this.execution = null
-          allRes.push({
-            typ: 'res',
-            cmd: cmd,
-            val: res
-          })
-        }
-      } catch (e) {
+      this._continue(allRes)
+    }
+    if (!this.execution) {
+      this._runQueue(allRes)
+    }
+    return allRes.length > 0 ? allRes : null
+  }
+  _continue (allRes) {
+    let ex = this.execution
+    ex.runFor = this.cp0
+    try {
+      let { res, used } = lang.run(null, ex)
+      this.cp0 -= used
+      if (res.paused) {
+        this.execution = res
+      } else {
         this.execution = null
+        allRes.push({
+          typ: 'res',
+          cmd: cmd,
+          val: res
+        })
+      }
+    } catch (e) {
+      this.execution = null
+      allRes.push({
+        typ: 'error',
+        cmd: cmd,
+        val: 'crash: ' + e
+      })
+    }
+  }
+  _runQueue (allRes) {
+    loop: for (; this.cp0 > 0 && this.queue.length > 0; this.cp0--) {
+      let line = this.queue.shift()
+      let [cmd, args] = split(line)
+      let prog = this.programs.get(cmd)
+      while (prog && prog.alias) {
+        [cmd, args] = split(prog.alias)
+        prog = this.programs.get(cmd)
+      }
+      if (!prog) {
         allRes.push({
           typ: 'error',
           cmd: cmd,
-          val: 'crash: ' + e
+          val: 'not found'
         })
-      }
-    }
-    if (!this.execution) {
-      loop: for (; this.cp0 > 0 && this.queue.length > 0; this.cp0--) {
-        let line = this.queue.shift()
-        let [cmd, args] = split(line)
-        let prog = this.programs.get(cmd)
-        while (prog && prog.alias) {
-          [cmd, args] = split(prog.alias)
-          prog = this.programs.get(cmd)
-        }
-        if (!prog) {
-          allRes.push({
-            typ: 'error',
-            cmd: cmd,
-            val: 'not found'
-          })
-        } else if (prog.f) {
-          let res = prog.f(this, args)
-          this.cp0 -= 5
-          if (!res) {
-            res = {
-              typ: 'res',
-              cmd: cmd
-            }
+      } else if (prog.f) {
+        let res = prog.f(this, args)
+        this.cp0 -= 5
+        if (!res) {
+          res = {
+            typ: 'res',
+            cmd: cmd
           }
-          if (!res.typ) {
-            res = {
+        }
+        if (!res.typ) {
+          res = {
+            typ: 'res',
+            cmd: cmd,
+            val: res
+          }
+        }
+        allRes.push(res)
+      } else if (prog.c) {
+        allRes.push({
+          typ: 'res',
+          cmd: cmd,
+          val: prog.c
+        })
+      } else if (prog.app) {
+        try {
+          let { res, used } = lang.run(prog.app, { m: this.memory, ops: this.ops, runFor: this.cp0 })
+          this.cp0 -= used
+          if (res.paused) {
+            this.execution = res
+          } else {
+            allRes.push({
               typ: 'res',
               cmd: cmd,
               val: res
-            }
-          }
-          allRes.push(res)
-        } else if (prog.c) {
-          allRes.push({
-            typ: 'res',
-            cmd: cmd,
-            val: prog.c
-          })
-        } else if (prog.app) {
-          try {
-            let { res, used } = lang.run(prog.app, { m: this.memory, ops: this.ops, runFor: this.cp0 })
-            this.cp0 -= used
-            if (res.paused) {
-              this.execution = res
-            } else {
-              allRes.push({
-                typ: 'res',
-                cmd: cmd,
-                val: res
-              })
-            }
-          } catch (e) {
-            allRes.push({
-              typ: 'error',
-              cmd: cmd,
-              val: 'crash: ' + e
             })
           }
-        } else {
+        } catch (e) {
           allRes.push({
             typ: 'error',
             cmd: cmd,
-            val: 'can\'t do'
+            val: 'crash: ' + e
           })
         }
+      } else {
+        allRes.push({
+          typ: 'error',
+          cmd: cmd,
+          val: 'can\'t do'
+        })
       }
     }
-    return allRes.length > 0 ? allRes : null
   }
 }
 
