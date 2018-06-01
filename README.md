@@ -97,6 +97,10 @@ pre-installed for one offs. Try:
 That should return 3, hopefully. Of course it may take a moment if there is
 processing to do, but it will appear in the events view soon enough.
 
+Disclaimer:  I don't know FORTH. I chose it because it seemed to be simple to
+implement, and not need a grammar. I used [https://github.com/eatonphil/jsforth]
+as a spec, but didn't look at the code, as I wanted to do it all myself.
+
 Most programs are actually just wrappers around special, hardware specific, ops.
 The above "tell" program actually has just a couple of lines, ending with the
 "tell" op, which is specific to composite machines. Sending commands to

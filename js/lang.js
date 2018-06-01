@@ -6,6 +6,7 @@ const NUMBER = Symbol('number')
 const WORD = Symbol('word')
 const DEF = Symbol('def`')
 const IF = Symbol('if')
+const LOOP = Symbol('loop')
 const END = Symbol('end')
 
 function parse (s) {
@@ -18,16 +19,18 @@ function parse (s) {
 
   function newFrame (name, parent) {
     let isif = name === 'if'
-    if (isif) {
-      name = parent.name + '_if_' + parent.ifs++
+    let isloop = name === 'loop'
+    if (isif || isloop) {
+      name = parent.name + '$' + parent.subs++
     }
     let symbols = []
     apps[name] = symbols
     return {
       name: name,
       isif: isif,
+      isloop: isloop,
       parent: parent,
-      ifs: 0,
+      subs: 0,
       symbols: symbols
     }
   }
@@ -94,6 +97,13 @@ function parse (s) {
             let nf = newFrame('if', frame)
             frame.symbols.push({
               t: IF,
+              v: nf.name
+            })
+            frame = nf
+          } else if (n === 'loop') {
+            let nf = newFrame('loop', frame)
+            frame.symbols.push({
+              t: LOOP,
               v: nf.name
             })
             frame = nf
@@ -181,6 +191,24 @@ const ops = {
     s.push(v)
     s.push(v)
   },
+  'over': (m, s) => {
+    let [a, b] = [s.pop(), s.pop()]
+    s.push(b)
+    s.push(a)
+    s.push(b)
+  },
+  'invert': (m, s) => {
+    let v = s.pop()
+    s.push(!!v)
+  },
+  'swap': (m, s) => {
+    let [a, b] = [s.pop(), s.pop()]
+    s.push(a)
+    s.push(b)
+  },
+  'clear': (m, s) => {
+    s.length = 0
+  },
   'store': (m, s) => {
     let [name, data] = [s.pop(), s.pop()]
     m[name] = data
@@ -197,6 +225,7 @@ const ops = {
 }
 
 function run (p, opts) {
+  opts = opts || {}
   p = p || opts.p
   let s = opts.s = opts.s || []
   let m = opts.m = opts.m || {}
@@ -210,9 +239,16 @@ function run (p, opts) {
   while (true) {
     let c = frame.f[frame.n++]
     if (c.t === END) {
-      frame = frame.parent
-      if (!frame) {
-        break
+      if (frame.times > 1) {
+        // console.log('repeat')
+        frame.times--
+        frame.n = 0
+      } else {
+        // console.log('leave')
+        frame = frame.parent
+        if (!frame) {
+          break
+        }
       }
     } else if (c.t === IF) {
       let b = s.pop()
@@ -220,6 +256,14 @@ function run (p, opts) {
         let sub = p[c.v]
         // console.log('enter if', c.v)
         frame = { f: sub, n: 0, parent: frame }
+      }
+    } else if (c.t === LOOP) {
+      let [b, a] = [s.pop(), s.pop()]
+      let times = a - b
+      if (times > 0) {
+        let sub = p[c.v]
+        // console.log('enter loop', c.v, times)
+        frame = { f: sub, n: 0, parent: frame, times: times }
       }
     } else if (c.t === WORD) {
       let op = ops[c.v]
@@ -247,10 +291,11 @@ function run (p, opts) {
       paused = true
       break
     }
+    // console.log(s)
   }
 
   if (!paused) {
-    opts.res = s.pop()
+    opts.res = s[s.length - 1]
   } else {
     opts.frame = frame
   }
@@ -260,16 +305,23 @@ function run (p, opts) {
   return opts
 }
 
-// let s = []
-// let m = {}
-// // let source = ':add1 1 + ; 3 4 + 2 - add1 add1 add1 "ok, that\'s it" dup "note" store drop print ;'
-// // let source = '1 if "true" print ; 0 if "false" print ; ;'
-// let source = ':add1_if_not_0 dup 0 != if 1 + ; ; 0 add1_if_not_0 print 5 add1_if_not_0 print ;'
-//
-// let p = parse(source)
-// console.log('program', p)
-// let r = run (p, s, m)
-// console.log('stack', s)
-// console.log('memory', m)
+function t (src) {
+  console.log(src)
+  let p = parse(src)
+  console.log(p)
+  console.log(run(p))
+  console.log()
+}
+
+// t(':add1 1 + ; 3 4 + 2 - add1 add1 add1 "ok, that\'s it" dup "note" store drop print ;')
+// t('1 if "true" print ; 0 if "false" print ; ;')
+// t(':add1_if_not_0 dup 0 != if 1 + ; ; 0 add1_if_not_0 print 5 add1_if_not_0 print ;')
+// t('5 0 loop "ok" print ; ;')
+// t('0 5 loop "ok" print ; ;')
+// t('2 3 over swap')
+
+// t(':pow over swap 1 loop over * ; swap drop ; 2 3 pow ;')
+// t(':fib dup 1 > if 1 - dup fib swap 1 - fib + ; ; 6 fib ;')
+// t(':fac dup 1 > if dup 1 - fac * ; dup 0 = if drop 1 ; dup 1 = if drop 1 ; ; 3 fac ;')
 
 export { parse, run }
