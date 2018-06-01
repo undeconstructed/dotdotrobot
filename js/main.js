@@ -75,6 +75,7 @@ let buttons = new Buttons(document.getElementById('buttons'))
 class Entry extends UIThing {
   constructor (box) {
     super()
+    this.box = box
     let form = box.querySelector('form')
     let i = form.querySelector('input')
     form.addEventListener('submit', e => {
@@ -91,6 +92,9 @@ class Entry extends UIThing {
       e.stopPropagation()
       return true
     })
+  }
+  focus () {
+    this.box.querySelector('input').focus()
   }
 }
 
@@ -125,3 +129,5 @@ let tick = function() {
 }
 
 tick()
+
+entry.focus()
