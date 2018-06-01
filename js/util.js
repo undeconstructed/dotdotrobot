@@ -1,18 +1,25 @@
 
-export function join(a, s) {
+export function join (a, s, f) {
+  f = f || (e => e.toString())
   s = s || ','
   let size = a.length || a.size
   if (size == 0) {
     return ''
   } else if (size == 1) {
     let i = a[Symbol.iterator]()
-    return i.next().value.toString()
+    return f(i.next().value)
   } else {
     let i = a[Symbol.iterator]()
-    let out = i.next().value.toString()
+    let out = f(i.next().value)
     for (let e = i.next(); !e.done; e = i.next()) {
-      out += s + e.value.toString()
+      out += s + f(e.value)
     }
     return out
   }
+}
+
+export function distance (p1, p2) {
+  let dx = p1.x - p2.x
+  let dy = p1.y - p2.y
+  return Math.sqrt(dx*dx + dy*dy)
 }

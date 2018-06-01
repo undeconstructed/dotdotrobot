@@ -1,6 +1,6 @@
 
 import makeName from './names.js'
-import { join } from './util.js'
+import { join, distance } from './util.js'
 import * as lang from './lang.js'
 
 const assert = (console ? console.assert : function () {})
@@ -17,6 +17,7 @@ function split(s) {
 class Thing {
   constructor () {
     this.parent = null
+    this.position = null
   }
   place (parent, opts) {
     return parent.accept(this, opts)
@@ -433,8 +434,10 @@ class Area extends Thing {
     assert(child instanceof Thing)
     this.children.add(child)
     child.parent = this
-    child.x = opts.x || 0
-    child.y = opts.y || 0
+    child.position = {
+      x: opts.x || 0,
+      y: opts.y || 0
+    }
     return true
   }
   remove (child) {
@@ -465,7 +468,8 @@ class Area extends Thing {
       if (e === child) {
         continue
       }
-      if (e.x == child.x && e.y == child.y) {
+      let dist = distance(child.position, e.position)
+      if (dist < 10) {
         out.push(e)
       }
     }
@@ -606,7 +610,11 @@ class Scanner1 extends Component {
     super()
     this.addOp('scan', (m, s) => {
       let near = this.area.visibleTo(this.piece)
-      s.push( near.join(', '))
+      // let list = []
+      // for (let n of near) {
+      //   list.push([n, n.])
+      // }
+      s.push(join(near, ', ', e => `${e.toString()}=(${e.position.x},${e.position.y})`))
     })
     this.compileProgram('scan', 'scan ;')
   }
@@ -704,7 +712,7 @@ class Robot1 extends Piece {
     super.tick()
   }
   toString () {
-    return `robot '${this.name}'@(${this.x},${this.y}) ` + super.toString()
+    return `robot '${this.name}' ` + super.toString()
   }
 }
 
@@ -714,8 +722,10 @@ class Run {
     this.world = new World(this, 100, 100)
     this.player = new Player()
     this.player.place(this.world, { x: 10, y: 20 })
-    let r1 = new Robot1(makeName())
-    r1.place(this.world, { x: 10, y: 20 })
+    new Robot1(makeName()).place(this.world, { x: 12, y: 16 })
+    new Robot1(makeName()).place(this.world, { x: 1, y: 1 })
+    new Robot1(makeName()).place(this.world, { x: 8, y: 22 })
+    new Robot1(makeName()).place(this.world, { x: 80, y: 90 })
   }
   accept () {
     return false
