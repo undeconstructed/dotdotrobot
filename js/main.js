@@ -11,28 +11,30 @@ class State extends UIThing {
   constructor (box) {
     super()
     this.box = box
+    this.box.classList.add('drawn')
+    this.area = document.createElement('div')
+    this.box.appendChild(this.area)
   }
   update (data) {
-    this.box.textContent = JSON.stringify(data, mapper)
+    this.area.textContent = JSON.stringify(data, mapper)
   }
 }
-
-let state = new State(document.getElementById('state'))
 
 const mapper = (k, v) => (v instanceof Set || v instanceof Map ? Array.from(v) : v)
 
 class Console extends UIThing {
-  constructor (box) {
+  constructor (box, f) {
     super()
+    this.f = f || (e => JSON.stringify(e, mapper))
     this.box = box
-    this.list = box.querySelector('ul')
+    this.box.classList.add('lines')
+    this.list = document.createElement('ul')
+    this.box.appendChild(this.list)
     this.entries = []
   }
   add (ev0) {
-    let n = ev0.n
-    delete ev0.n
     let e0 = document.createElement('li')
-    e0.textContent = `${n}: ${JSON.stringify(ev0, mapper)}`
+    e0.textContent = `${this.f(ev0)}`
     this.list.appendChild(e0)
     this.entries.push(e0)
     if (this.entries.length > 50) {
@@ -41,8 +43,6 @@ class Console extends UIThing {
     this.list.scrollIntoView(false)
   }
 }
-
-let c0nsole = new Console(document.getElementById('events'))
 
 class Buttons extends UIThing {
   constructor (box) {
@@ -98,9 +98,11 @@ class Entry extends UIThing {
   }
 }
 
-let entry = new Entry(document.getElementById('entry'))
 
-let history = new Console(document.getElementById('history'))
+let state = new State(document.getElementById('state'))
+let events = new Console(document.getElementById('events'), e => { let n = e.n; delete e.n; return `${n}: ${JSON.stringify(e, mapper)}`})
+let entry = new Entry(document.getElementById('entry'))
+let history = new Console(document.getElementById('history'), e => `${e.n.toTimeString()}: ${e.line}`)
 
 let boxN = document.querySelector('#counter .n')
 
@@ -121,7 +123,7 @@ let tick = function() {
         state.update(e.val)
         break
       default:
-        c0nsole.add(e)
+        events.add(e)
       }
     }
   }

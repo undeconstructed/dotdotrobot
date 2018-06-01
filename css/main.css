@@ -118,12 +118,12 @@ body {
 
 .main > .row {
   display: flex;
-  flex-flow: row nowrap;
+  flex-direction: row;
   align-items: stretch;
   justify-content: space-between;
 }
 .main > .row > .cell {
-  flex: 1;
+  flex: 50% 1;
   margin: 5px;
   display: flex;
   flex-flow: column nowrap;
@@ -147,17 +147,17 @@ body {
   border: 1px solid black;
   flex: 1;
 }
-.box.drawn {
+.box.drawn > div {
   white-space: pre;
-  overflow: auto;
 }
-.box.lines ul {
+.box.lines > ul {
   list-style-type: none;
   padding: 0;
   margin: 0;
 }
 .box.buttons {
   display: none;
+  flex: 0;
 }
 
 #history {
