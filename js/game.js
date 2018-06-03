@@ -1,23 +1,18 @@
 
-import makeName from './names.js'
-import { join, distance } from './util.js'
+import { split, join, distance } from './util.js'
+import * as random from './random.js'
+import Machine from './machine.js'
 import * as lang from './lang.js'
 
 const assert = (console ? console.assert : function () {})
 
-function split(s) {
-  s = s.trim().split(/\s+/).join(' ')
-  let i = s.indexOf(' ')
-  if (i > 0) {
-    return [s.substr(0, i), s.substr(i + 1)]
-  }
-  return [s, null]
-}
-
 class Thing {
-  constructor () {
-    this.parent = null
-    this.position = null
+  constructor (opts) {
+    opts = opts || {}
+    this.parent = opts.parent || null
+    this.size = opts.size || 'small'
+    this.position = opts.position || null
+    this.colour = opts.colour || 'white'
   }
   place (parent, opts) {
     return parent.accept(this, opts)
@@ -53,217 +48,9 @@ class Thing {
   }
 }
 
-class Machine {
-  constructor (cps, maxPrograms, queueSize, memorySize) {
-    this.cps = cps
-    this.cp0 = 0
-    this.maxPrograms = maxPrograms
-    this.programs = new Map()
-    this.memorySize = memorySize
-    this.memory = {}
-    this.queueSize = queueSize
-    this.queue = []
-    this.ops = {}
-    this.execution = null
-    this.installProgram('install', { f: (m, args) => {
-      let [name, src] = split(args)
-      let app = null
-      try {
-        app = lang.parse(src)
-      } catch (e) {
-        return {
-          typ: 'error',
-          val: 'can\'t compile: ' + e
-        }
-      }
-      this.installProgram(name, { app, src })
-    } })
-    this.installProgram('script', { f: (m, args) => {
-      // this is a dynamicly inputted program
-      let src = args
-      let app = null
-      try {
-        app = lang.parse(src)
-      } catch (e) {
-        return {
-          typ: 'error',
-          val: 'can\'t compile: ' + e
-        }
-      }
-      try {
-        let { res, used } = lang.run(app, { m: this.memory, ops: this.ops, runFor: this.cp0 })
-        this.cp0 -= used
-        return {
-          typ: 'res',
-          val: res
-        }
-      } catch (e) {
-        return {
-          typ: 'error',
-          val: 'crash: ' + e
-        }
-      }
-    }})
-  }
-  addOp (name, func) {
-    this.ops[name] = func
-  }
-  installProgram (name, prorgam) {
-    if (this.programs.size < this.maxPrograms) {
-      this.programs.set(name, prorgam)
-      return true
-    }
-    return false
-  }
-  hasProgram (name) {
-    return this.programs.has(name)
-  }
-  listPrograms () {
-    return [...this.programs.keys()]
-  }
-  describeProgram (name) {
-    let p = this.programs.get(name)
-    if (p) {
-      if (p.f) {
-        return 'native'
-      } else if (p.c) {
-        return 'constant: ' + p.c
-      } else if (p.alias) {
-        return 'alias: ' + p.alias
-      } else if (p.app) {
-        return 'app: ' + (p.src || p.app)
-      }
-    }
-    return 'unknown'
-  }
-  enqueue (command) {
-    if (this.queue.length < this.queueSize) {
-      this.queue.push(command)
-      return true
-    }
-    return false
-  }
-  setVariable (name, value) {
-    this.memory[name] = value
-  }
-  getVariable (name) {
-    return this.memory[name]
-  }
-  takeVariable (name) {
-    let value = this.memory[name]
-    delete this.memory[name]
-    return value
-  }
-  tick () {
-    this.cp0 = this.cps
-  }
-  execute () {
-    let allRes = []
-    if (this.execution) {
-      this._continue(allRes)
-    }
-    if (!this.execution) {
-      this._runQueue(allRes)
-    }
-    return allRes.length > 0 ? allRes : null
-  }
-  _continue (allRes) {
-    let ex = this.execution
-    ex.runFor = this.cp0
-    try {
-      let { res, used } = lang.run(null, ex)
-      this.cp0 -= used
-      if (res.paused) {
-        this.execution = res
-      } else {
-        this.execution = null
-        allRes.push({
-          typ: 'res',
-          cmd: cmd,
-          val: res
-        })
-      }
-    } catch (e) {
-      this.execution = null
-      allRes.push({
-        typ: 'error',
-        cmd: cmd,
-        val: 'crash: ' + e
-      })
-    }
-  }
-  _runQueue (allRes) {
-    loop: for (; this.cp0 > 0 && this.queue.length > 0; this.cp0--) {
-      let line = this.queue.shift()
-      let [cmd, args] = split(line)
-      let prog = this.programs.get(cmd)
-      while (prog && prog.alias) {
-        [cmd, args] = split(prog.alias)
-        prog = this.programs.get(cmd)
-      }
-      if (!prog) {
-        allRes.push({
-          typ: 'error',
-          cmd: cmd,
-          val: 'not found'
-        })
-      } else if (prog.f) {
-        let res = prog.f(this, args)
-        this.cp0 -= 5
-        if (!res) {
-          res = {
-            typ: 'res',
-            cmd: cmd
-          }
-        }
-        if (!res.typ) {
-          res = {
-            typ: 'res',
-            cmd: cmd,
-            val: res
-          }
-        }
-        allRes.push(res)
-      } else if (prog.c) {
-        allRes.push({
-          typ: 'res',
-          cmd: cmd,
-          val: prog.c
-        })
-      } else if (prog.app) {
-        try {
-          let { res, used } = lang.run(prog.app, { m: this.memory, ops: this.ops, runFor: this.cp0 })
-          this.cp0 -= used
-          if (res.paused) {
-            this.execution = res
-          } else {
-            allRes.push({
-              typ: 'res',
-              cmd: cmd,
-              val: res
-            })
-          }
-        } catch (e) {
-          allRes.push({
-            typ: 'error',
-            cmd: cmd,
-            val: 'crash: ' + e
-          })
-        }
-      } else {
-        allRes.push({
-          typ: 'error',
-          cmd: cmd,
-          val: 'can\'t do'
-        })
-      }
-    }
-  }
-}
-
 class Programmable extends Thing {
-  constructor () {
-    super()
+  constructor (opts) {
+    super(opts)
     // this thing is the actual computer
     this.machine = new Machine(50, 20, 10, 10)
     // universally installed programs
@@ -299,8 +86,8 @@ class Programmable extends Thing {
 }
 
 class Composite extends Programmable {
-  constructor () {
-    super()
+  constructor (opts) {
+    super(opts)
     this.slots = new Set()
     this.parts = new Map()
     // tell as an op
@@ -401,8 +188,8 @@ class Composite extends Programmable {
 }
 
 class Piece extends Composite {
-  constructor () {
-    super()
+  constructor (opts) {
+    super(opts)
   }
   slide (x, y) {
     return this.parent.slide(this, x, y)
@@ -614,7 +401,7 @@ class Scanner1 extends Component {
       // for (let n of near) {
       //   list.push([n, n.])
       // }
-      s.push(join(near, ', ', e => `${e.toString()}=(${e.position.x},${e.position.y})`))
+      s.push(join(near, ', ', e => `${e.size} ${e.colour} thing @ (${e.position.x},${e.position.y})`))
     })
     this.compileProgram('scan', 'scan ;')
   }
@@ -625,7 +412,7 @@ class Scanner1 extends Component {
 
 class Player extends Piece {
   constructor () {
-    super()
+    super({ colour: 'pink', size: 'medium' })
     // default extension points
     this.addSlot('arm-1')
     this.addSlot('arm-2')
@@ -697,8 +484,8 @@ class Player extends Piece {
 }
 
 class Robot1 extends Piece {
-  constructor (name) {
-    super()
+  constructor (name, colour) {
+    super({ colour })
     this.name = name
     this.compileProgram('doodle', '"doodling" log')
   }
@@ -712,7 +499,7 @@ class Robot1 extends Piece {
     super.tick()
   }
   toString () {
-    return `robot '${this.name}' ` + super.toString()
+    return `${this.colour} robot '${this.name}' ` + super.toString()
   }
 }
 
@@ -722,10 +509,13 @@ class Run {
     this.world = new World(this, 100, 100)
     this.player = new Player()
     this.player.place(this.world, { x: 10, y: 20 })
-    new Robot1(makeName()).place(this.world, { x: 12, y: 16 })
-    new Robot1(makeName()).place(this.world, { x: 1, y: 1 })
-    new Robot1(makeName()).place(this.world, { x: 8, y: 22 })
-    new Robot1(makeName()).place(this.world, { x: 80, y: 90 })
+    this.addRandomRobot({ x: 12, y: 16 })
+    this.addRandomRobot({ x: 1, y: 1 })
+    this.addRandomRobot({ x: 8, y: 22 })
+    this.addRandomRobot({ x: 80, y: 90 })
+  }
+  addRandomRobot (opts) {
+    new Robot1(random.name(), random.colour()).place(this.world, opts)
   }
   accept () {
     return false

@@ -1,4 +1,13 @@
 
+export function split(s) {
+  s = s.trim().split(/\s+/).join(' ')
+  let i = s.indexOf(' ')
+  if (i > 0) {
+    return [s.substr(0, i), s.substr(i + 1)]
+  }
+  return [s, null]
+}
+
 export function join (a, s, f) {
   f = f || (e => e.toString())
   s = s || ','
