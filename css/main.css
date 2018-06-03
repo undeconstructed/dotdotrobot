@@ -98,50 +98,54 @@ textarea {
    ========================================================================== */
 
 body {
-  font-family: sans-serif;
+  font-family: 'Cantarell', sans-serif;
+  background-color: #eee;
 }
 
 .main {
-  display: flex;
+  /* display: flex;
   flex-flow: column nowrap;
   align-items: stretch;
-  justify-content: space-between;
+  justify-content: space-between; */
+  display: grid;
+  grid-template-columns: 50% 50%;
+  grid-template-rows: 0fr minmax(0, 3fr) 1fr;
   height: 100vh;
   width: 100%;
 }
 
-.main > h1 {
+.cell > h1 {
   flex: 0;
   margin: 5px 0;
   text-align: center;
 }
 
-.main > .row {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  justify-content: space-between;
-}
-.main > .row > .cell {
+.cell {
   flex: 50% 1;
-  margin: 5px;
+  padding: 5px;
   display: flex;
   flex-flow: column nowrap;
 }
-.main > .row > .cell > h3 {
+.cell > h3 {
   margin: 0 0 0 0;
 }
 
-.main > .row1 {
-  flex: 2;
+.cell0 {
+  grid-area: 1 / 1 / 1 / 3;
 }
-.main > .row2 {
-  flex: 1;
+.cell1 {
+  grid-area: 2 / 1 / 2 / 1;
+}
+.cell2 {
+  grid-area: 2 / 2 / 2 / 2;
+}
+.cell3 {
+  grid-area: 3 / 1 / 3 / 3;
 }
 
 .box {
   border-radius: 5px;
-  background-color: gray;
+  background-color: #aaa;
   padding: 5px;
   overflow: auto;
   border: 1px solid black;
@@ -165,6 +169,13 @@ body {
   border-bottom-right-radius: 0;
   border-bottom-left-radius: 0;
 }
+#history li {
+  cursor: pointer;
+  border-radius: 5px;
+}
+#history li:hover {
+  background-color: #eee;
+}
 
 #entry {
   border-bottom-right-radius: 5px;
@@ -172,12 +183,14 @@ body {
   border: 1px solid black;
   border-top: none;
   padding: 10px;
+  background-color: #f7f7f7;
 }
 #entry input[type=text] {
   width: 100%;
   border: 0;
   padding: 0;
   font-size: 150%;
+  background: transparent;
 }
 
 #counter {
