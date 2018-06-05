@@ -1,4 +1,6 @@
 
+export const assert = (console ? console.assert : function () {})
+
 export function split(s) {
   s = s.trim().split(/\s+/).join(' ')
   let i = s.indexOf(' ')

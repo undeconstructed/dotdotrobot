@@ -1,10 +1,8 @@
 
-import { split, join, distance } from './util.js'
+import { assert, split, join, distance } from './util.js'
 import * as random from './random.js'
 import Machine from './machine.js'
 import * as lang from './lang.js'
-
-const assert = (console ? console.assert : function () {})
 
 class Thing {
   constructor (opts) {
@@ -13,6 +11,7 @@ class Thing {
     this.size = opts.size || 'small'
     this.position = opts.position || null
     this.colour = opts.colour || 'white'
+    this.momemtum = opts.momemtum || null
   }
   place (parent, opts) {
     return parent.accept(this, opts)
@@ -427,6 +426,15 @@ class Player extends Piece {
     this.compileProgram('help', '"try typing list-programs" ;"')
     this.compileProgram('look', '"scan" "eye" tell ;')
     this.compileProgram('grab', '"grab" "arm-1" tell ;')
+    this.installProgram('state', { f: (m, args) => {
+      return {
+        typ: 'state',
+        val: {
+          power: 100,
+          wear: 10
+        }
+      }
+    }})
     this.installProgram('compose', { f: (m, args) => {
       let res = m.getVariable('res')
       // turn composite result into more user friendly things
