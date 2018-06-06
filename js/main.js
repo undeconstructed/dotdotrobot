@@ -98,20 +98,19 @@ class Map extends Cell {
     ctx.restore()
   }
   drawData (ctx) {
-    if (this.data.length > 0) {
+    for (let e of this.data) {
       ctx.save()
-      // ctx.scale(this.pulse, this.pulse)
-      ctx.fillStyle = 'rgb(255, 255, 255)'
+      ctx.fillStyle = e.colour
       ctx.strokeStyle = 'rgb(0,0,0)'
       ctx.beginPath()
-      ctx.arc(75, 75, this.pulse * 10, 0, Math.PI * 2, true)
+      ctx.arc(e.x * this.scale, e.y * this.scale, this.pulse * 10, 0, Math.PI * 2, true)
       ctx.fill()
       ctx.stroke()
       ctx.restore()
     }
   }
   update (data) {
-    this.data.push(data)
+    this.data = JSON.parse(data)
   }
 }
 
@@ -210,7 +209,7 @@ class Entry {
       e.stopPropagation()
       let line = this.i.value
       if (line) {
-        runner.command(line)
+        line.split(';').forEach(cmd => runner.command(cmd))
         this.parent.memo({ n: new Date(), line: line })
       }
       this.i.value = ''

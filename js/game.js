@@ -11,7 +11,7 @@ class Thing {
     this.size = opts.size || 'small'
     this.position = opts.position || null
     this.colour = opts.colour || 'white'
-    this.momemtum = opts.momemtum || null
+    this.motion = opts.motion || null
   }
   place (parent, opts) {
     return parent.accept(this, opts)
@@ -175,7 +175,7 @@ class Composite extends Programmable {
       }
       return res
     }
-    return null
+    return []
   }
   toString () {
     if (this.parts.size > 0) {
@@ -189,9 +189,6 @@ class Composite extends Programmable {
 class Piece extends Composite {
   constructor (opts) {
     super(opts)
-  }
-  slide (x, y) {
-    return this.parent.slide(this, x, y)
   }
   move (newParent, opts) {
     return this.parent.pass(this, newParent, opts)
@@ -212,8 +209,23 @@ class Area extends Thing {
     return parent.accept(this, { x: x, y: y })
   }
   tick () {
-    for (let e of this.children) {
-      e.tick()
+    for (let child of this.children) {
+      child.tick()
+    }
+    for (let child of this.children) {
+      if (child.motion) {
+        let m = child.motion
+        let nx = child.position.x + m.x
+        let ny =  child.position.y + m.y
+        if (nx < 0) nx = 0
+        if (ny < 0) ny = 0
+        if (nx > this.w) nx = this.w
+        if (ny > this.h) ny = this.h
+        child.position.x = nx
+        child.position.y = ny
+        // motion stops immediately for now
+        child.motion = { x: 0, y: 0 }
+      }
     }
   }
   accept (child, opts) {
@@ -238,16 +250,6 @@ class Area extends Thing {
     }
     return false
   }
-  slide (child, x, y) {
-    let nx = child.x + x
-    let ny =  child.y + y
-    if (nx >= 0 && ny >= 0 && nx <= this.w && ny <= this.h) {
-      child.x = nx
-      child.y = ny
-      return true
-    }
-    return false
-  }
   visibleTo (child) {
     let out = []
     for (let e of this.children) {
@@ -255,7 +257,7 @@ class Area extends Thing {
         continue
       }
       let dist = distance(child.position, e.position)
-      if (dist < 10) {
+      if (dist < 50) {
         out.push(e)
       }
     }
@@ -314,10 +316,10 @@ class Arm1 extends Component {
     this.addOp('release', (m, s) => {
       // let owner = this.piece
       if (this.holding) {
-        this.holding.move(this.area, { x: this.holding.x, y: this.holding.y })
+        this.holding.move(this.area, this.holding.position)
         s.push('released')
       } else {
-        s.puhs('not holding anything!')
+        s.push('not holding anything!')
       }
     })
     this.addOp('holding', (m, s) => {
@@ -374,16 +376,12 @@ class Arm1 extends Component {
     return true
   }
   pass (piece, newParent, opts) {
-    if (this.holding == piece) {
+    if (this.holding === piece) {
       if (newParent.accept(piece, opts)) {
         this.holding = null
         return true
       }
     }
-    return false
-  }
-  slide (child, x, y) {
-    // arm has a very strong grip
     return false
   }
   toString () {
@@ -396,11 +394,13 @@ class Scanner1 extends Component {
     super()
     this.addOp('scan', (m, s) => {
       let near = this.area.visibleTo(this.piece)
-      // let list = []
-      // for (let n of near) {
-      //   list.push([n, n.])
-      // }
-      s.push(join(near, ', ', e => `${e.size} ${e.colour} thing @ (${e.position.x},${e.position.y})`))
+      let o = near.map(e => ({
+        x: e.position.x,
+        y: e.position.y,
+        size: e.size,
+        colour: e.colour
+      }))
+      s.push(JSON.stringify(o))
     })
     this.compileProgram('scan', 'scan ;')
   }
@@ -426,6 +426,15 @@ class Player extends Piece {
     this.compileProgram('help', '"try typing list-programs" ;"')
     this.compileProgram('look', '"scan" "eye" tell ;')
     this.compileProgram('grab', '"grab" "arm-1" tell ;')
+    this.installProgram('set-idle', { f: (m, args) => {
+      let prog = args ? args.trim() : null
+      if (prog) {
+        this.installProgram('idle', { alias: prog })
+      } else {
+        this.installProgam('idle', null)
+      }
+      return 'ok'
+    } })
     this.installProgram('state', { f: (m, args) => {
       return {
         typ: 'state',
@@ -434,7 +443,7 @@ class Player extends Piece {
           wear: 10
         }
       }
-    }})
+    } })
     this.installProgram('compose', { f: (m, args) => {
       let res = m.getVariable('res')
       // turn composite result into more user friendly things
@@ -453,7 +462,7 @@ class Player extends Piece {
         }
         m.setVariable('out', events)
       }
-    }})
+    } })
   }
   startTick (commands) {
     if (commands) {
@@ -469,8 +478,18 @@ class Player extends Piece {
   }
   tick () {
     let res = super.tick()
+    if (this.machine.cp0 > 0 && this.machine.hasProgram('idle')) {
+      this.command('idle')
+      let res2 = this.machine.execute()
+      if (res2) {
+        if (res) {
+          res = res.concat(res2)
+        } else {
+          res = res2
+        }
+      }
+    }
     if (res) {
-      // if no compose program was installed
       for (let r of res) {
         this.events.push(r)
       }
@@ -495,16 +514,24 @@ class Robot1 extends Piece {
   constructor (name, colour) {
     super({ colour })
     this.name = name
-    this.compileProgram('doodle', '"doodling" log')
+    this.power = { x: 0, y: 0 }
+    this.machine.addOp('power', (m, s) => {
+      let [y, x] = [s.pop(), s.pop()]
+      this.power.x = x
+      this.power.y = y
+    })
+    this.compileProgram('doodle', '0 2 rand 0 2 rand power ;')
   }
   setName (name) {
     this.name = name
   }
   tick () {
-    if (this.machine.hasProgram('idle')) {
-      this.command('idle')
-    }
     super.tick()
+    if (this.machine.cp0 > 0 && this.machine.hasProgram('idle')) {
+      this.command('idle')
+      this.machine.execute()
+    }
+    this.motion = { x: this.power.x, y: this.power.y }
   }
   toString () {
     return `${this.colour} robot '${this.name}' ` + super.toString()

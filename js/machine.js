@@ -57,9 +57,12 @@ export default class Machine {
   addOp (name, func) {
     this.ops[name] = func
   }
-  installProgram (name, prorgam) {
+  installProgram (name, program) {
+    if (!program) {
+      this.programs.delete(name)
+    }
     if (this.programs.size < this.maxPrograms) {
-      this.programs.set(name, prorgam)
+      this.programs.set(name, program)
       return true
     }
     return false

@@ -221,6 +221,11 @@ const ops = {
     let v = s.pop()
     console.log(v)
     s.push(v)
+  },
+  'rand': (m, s) => {
+    let [max, min] = [s.pop(), s.pop()]
+    let r = Math.floor(Math.random() * (max - min + 1)) + min
+    s.push(r)
   }
 }
 
