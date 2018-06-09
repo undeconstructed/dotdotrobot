@@ -258,7 +258,11 @@ class Area extends Thing {
       }
       let dist = distance(child.position, e.position)
       if (dist < 50) {
-        out.push(e)
+        out.push({
+          x: child.position.x - e.position.x,
+          y: child.position.y - e.position.y,
+          e: e
+        })
       }
     }
     return out
@@ -395,10 +399,10 @@ class Scanner1 extends Component {
     this.addOp('scan', (m, s) => {
       let near = this.area.visibleTo(this.piece)
       let o = near.map(e => ({
-        x: e.position.x,
-        y: e.position.y,
-        size: e.size,
-        colour: e.colour
+        x: e.x,
+        y: e.y,
+        size: e.e.size,
+        colour: e.e.colour
       }))
       s.push(JSON.stringify(o))
     })
@@ -439,8 +443,9 @@ class Player extends Piece {
       return {
         typ: 'state',
         val: {
-          power: 100,
-          wear: 10
+          position: this.position,
+          power: [100, 100],
+          wear: [10, 100]
         }
       }
     } })
@@ -520,7 +525,7 @@ class Robot1 extends Piece {
       this.power.x = x
       this.power.y = y
     })
-    this.compileProgram('doodle', '0 2 rand 0 2 rand power ;')
+    this.compileProgram('doodle', ':r 0 4 rand 2 - ; r r power ;')
   }
   setName (name) {
     this.name = name

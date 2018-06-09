@@ -86,6 +86,7 @@ class Map extends Cell {
     for (let x = gap; x < this.w; x += gap) {
       this.drawLine(ctx, x, 0, x, this.w)
     }
+    this.drawSelf(ctx)
   }
   drawLine (ctx, x1, y1, x2, y2) {
     ctx.save()
@@ -103,14 +104,27 @@ class Map extends Cell {
       ctx.fillStyle = e.colour
       ctx.strokeStyle = 'rgb(0,0,0)'
       ctx.beginPath()
-      ctx.arc(e.x * this.scale, e.y * this.scale, this.pulse * 10, 0, Math.PI * 2, true)
+      ctx.arc((this.w / 2 + e.x * this.scale), (this.h / 2 + e.y * this.scale), this.pulse * 10, 0, Math.PI * 2, true)
       ctx.fill()
       ctx.stroke()
       ctx.restore()
     }
   }
-  update (data) {
-    this.data = JSON.parse(data)
+  drawSelf (ctx) {
+    ctx.save()
+    // ctx.fillStyle = 'white'
+    ctx.strokeStyle = 'rgb(0,0,0)'
+    ctx.beginPath()
+    ctx.arc(this.w / 2, this.h / 2, 10, 0, Math.PI * 2, true)
+    // ctx.fill()
+    ctx.stroke()
+    ctx.restore()
+  }
+  updateSelf (position) {
+    this.self = position
+  }
+  updateSeen (data) {
+    this.data = data
   }
 }
 
@@ -124,6 +138,11 @@ class Events extends Cell {
   }
 }
 
+function timeF(d) {
+  let [h, m, s] = [d.getHours(), d.getMinutes(), d.getSeconds()]
+  return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`
+}
+
 class Input extends Cell {
   constructor () {
     super()
@@ -131,15 +150,19 @@ class Input extends Cell {
     let historyBox = document.createElement('div')
     historyBox.classList.add('box')
     historyBox.classList.add('history')
-    this.history = new Console(historyBox, e => `${e.n.toTimeString()}: ${e.line}`, e => { console.log(e) })
+    this.history = new Console(historyBox, e => `[${timeF(e.n)}] ${e.cmd}`, e => { this.issue(e.cmd) })
     this.element.appendChild(historyBox)
     let inputBox = document.createElement('div')
     inputBox.innerHTML = '<form><input type="text" placeholder="$ ..."></form>'
     this.element.appendChild(inputBox)
     this.entry = new Entry(this, inputBox)
   }
-  memo (line) {
-    this.history.add(line)
+  issue (cmd) {
+    runner.command(cmd)
+    this.memo(cmd)
+  }
+  memo (cmd) {
+    this.history.add({ n: new Date(), cmd: cmd })
   }
   focus () {
     this.entry.focus()
@@ -160,7 +183,7 @@ class Console {
   add (ev0) {
     let e0 = document.createElement('li')
     e0.textContent = `${this.f(ev0)}`
-    e0.addEventListener('click',  e => this.c(e0))
+    e0.addEventListener('click',  e => this.c(ev0))
     this.list.appendChild(e0)
     this.entries.push(e0)
     if (this.entries.length > 50) {
@@ -171,8 +194,8 @@ class Console {
 }
 
 class Buttons {
-  constructor (box) {
-    this.input = input
+  constructor (parent, box) {
+    this.parent = parent
     this.box = box
     this.box.classList.add('buttons')
     this.add('look')
@@ -190,8 +213,7 @@ class Buttons {
     let b0 = document.createElement('button')
     b0.textContent = tag
     b0.addEventListener('click', e => {
-      history.add({ n: new Date(), line: cmd })
-      runner.command(cmd)
+      this.parent.issue(cmd)
     })
     this.box.appendChild(b0)
   }
@@ -209,8 +231,7 @@ class Entry {
       e.stopPropagation()
       let line = this.i.value
       if (line) {
-        line.split(';').forEach(cmd => runner.command(cmd))
-        this.parent.memo({ n: new Date(), line: line })
+        line.split(';').forEach(cmd => this.parent.issue(cmd))
       }
       this.i.value = ''
     })
@@ -265,7 +286,7 @@ let tick = function() {
       switch (e.typ) {
       case 'seen':
         // state.update(e.val)
-        map.update(e.val)
+        map.updateSeen(JSON.parse(e.val))
         break
       case 'state':
         state.update(e.val)
