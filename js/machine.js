@@ -2,79 +2,79 @@
 import { split } from './util.js'
 import * as lang from './lang.js'
 
+const Q = Symbol('q')
+
+class Memory {
+  constructor() {
+    this.m = new Map()
+  }
+  entries () {
+    return this.m.entries()
+  }
+  has (k) {
+    return this.m.has(k)
+  }
+  set (k, v) {
+    return this.m.set(k, v)
+  }
+  get (k) {
+    return this.m.get(k)
+  }
+  delete (k) {
+    return this.m.delete(k)
+  }
+}
+
 export default class Machine {
   constructor (cps, maxPrograms, queueSize, memorySize) {
     this.cps = cps
     this.cp0 = 0
     this.maxPrograms = maxPrograms
-    this.programs = new Map()
-    this.memorySize = memorySize
-    this.memory = {}
     this.queueSize = queueSize
-    this.queue = []
+    this.memory = new Memory(memorySize)
     this.ops = {}
     this.execution = null
-    this.installProgram('install', { f: (m, args) => {
-      let [name, src] = split(args)
-      let app = null
-      try {
-        app = lang.parse(src)
-      } catch (e) {
-        return {
-          typ: 'error',
-          val: 'can\'t compile: ' + e
-        }
-      }
-      this.installProgram(name, { app, src })
-    } })
-    this.installProgram('script', { f: (m, args) => {
-      // this is a dynamicly inputted program
-      let src = args
-      let app = null
-      try {
-        app = lang.parse(src)
-      } catch (e) {
-        return {
-          typ: 'error',
-          val: 'can\'t compile: ' + e
-        }
-      }
-      try {
-        let { res, used } = lang.run(app, { m: this.memory, ops: this.ops, runFor: this.cp0 })
-        this.cp0 -= used
-        return {
-          typ: 'res',
-          val: res
-        }
-      } catch (e) {
-        return {
-          typ: 'error',
-          val: 'crash: ' + e
-        }
-      }
-    }})
+    // machine level ops
+    this.addOp('store', (m, s) => {
+      let [name, data] = [s.pop(), s.pop()]
+      m.set(name, data)
+    })
+    this.addOp('load', (m, s) => {
+      let name = s.pop()
+      let data = m.get(name)
+      s.push(data)
+    })
+    // default memory
+    this.memory.set(Q, [])
   }
   addOp (name, func) {
     this.ops[name] = func
   }
+  get timeLeft () {
+    return this.cp0
+  }
   installProgram (name, program) {
     if (!program) {
-      this.programs.delete(name)
+      this.memory.delete(name)
     }
-    if (this.programs.size < this.maxPrograms) {
-      this.programs.set(name, program)
-      return true
-    }
-    return false
+    program.isProgram = true
+    return this.memory.set(name, program)
   }
   hasProgram (name) {
-    return this.programs.has(name)
+    let data = this.memory.get(name)
+    return data && data.isProgram
   }
   listPrograms () {
-    return [...this.programs.keys()]
+    let out = []
+    for (let [k, v] of this.memory.entries()) {
+      if (v && v.isProgram) {
+        out.push(k)
+      }
+    }
+    return out
   }
   describeProgram (name) {
-    let p = this.programs.get(name)
+    let p = this.memory.get(name)
     if (p) {
       if (p.f) {
         return 'native'
@@ -89,21 +89,22 @@ export default class Machine {
     return 'unknown'
   }
   enqueue (command) {
-    if (this.queue.length < this.queueSize) {
-      this.queue.push(command)
+    let q = this.memory.get(Q)
+    if (q.length < this.queueSize) {
+      q.push(command)
       return true
     }
     return false
   }
   setVariable (name, value) {
-    this.memory[name] = value
+    this.memory.set(name, value)
   }
   getVariable (name) {
-    return this.memory[name]
+    return this.memory.get(name)
   }
   takeVariable (name) {
-    let value = this.memory[name]
-    delete this.memory[name]
+    let value = this.memory.get(name)
+    this.memory.delete(name)
     return value
   }
   tick () {
@@ -117,7 +118,7 @@ export default class Machine {
     if (!this.execution) {
       this._runQueue(allRes)
     }
-    return allRes.length > 0 ? allRes : null
+    return allRes
   }
   _continue (allRes) {
     let ex = this.execution
@@ -145,15 +146,16 @@ export default class Machine {
     }
   }
   _runQueue (allRes) {
-    loop: for (; this.cp0 > 0 && this.queue.length > 0; this.cp0--) {
-      let line = this.queue.shift()
+    let q = this.memory.get(Q)
+    loop: for (; this.cp0 > 0 && q.length > 0; this.cp0--) {
+      let line = q.shift()
       let [cmd, args] = split(line)
-      let prog = this.programs.get(cmd)
-      while (prog && prog.alias) {
+      let prog = this.memory.get(cmd)
+      while (prog && prog.isProgram && prog.alias) {
         [cmd, args] = split(prog.alias)
-        prog = this.programs.get(cmd)
+        prog = this.memory.get(cmd)
       }
-      if (!prog) {
+      if (!prog || !prog.isProgram) {
         allRes.push({
           typ: 'error',
           cmd: cmd,
@@ -183,6 +185,7 @@ export default class Machine {
           val: prog.c
         })
       } else if (prog.app) {
+        this.memory.set('argv', args)
         try {
           let { res, used } = lang.run(prog.app, { m: this.memory, ops: this.ops, runFor: this.cp0 })
           this.cp0 -= used

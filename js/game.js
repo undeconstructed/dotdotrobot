@@ -52,10 +52,58 @@ class Programmable extends Thing {
     super(opts)
     // this thing is the actual computer
     this.machine = new Machine(50, 20, 10, 10)
+    // results of execution
+    this._results = []
     // universally installed programs
     this.addOp('log', (m, s) => {
       console.log('log', s.pop())
     })
+    // default programs
+    this.installProgram('delete', { f: (m, args) => {
+      m.takeVariable(args)
+    }})
+    this.installProgram('install', { f: (m, args) => {
+      // this compiles and installs a program
+      let [name, src] = split(args)
+      let app = null
+      try {
+        app = lang.parse(src)
+      } catch (e) {
+        return {
+          typ: 'error',
+          val: 'can\'t compile: ' + e
+        }
+      }
+      this.installProgram(name, { app, src })
+      return 'ok'
+    } })
+    this.installProgram('script', { f: (m, args) => {
+      // this is a dynamicly inputted program
+      let src = args
+      let app = null
+      try {
+        app = lang.parse(src)
+      } catch (e) {
+        return {
+          typ: 'error',
+          val: 'can\'t compile: ' + e
+        }
+      }
+      try {
+        // XXX - this may run out of runtime
+        let { res, used } = lang.run(app, { m: this.memory, ops: this.ops, runFor: this.cp0 })
+        this.cp0 -= used
+        return {
+          typ: 'res',
+          val: res
+        }
+      } catch (e) {
+        return {
+          typ: 'error',
+          val: 'crash: ' + e
+        }
+      }
+    }})
     this.installProgram('list-programs', { f: (m, args) => {
       return m.listPrograms()
     } })
@@ -72,15 +120,77 @@ class Programmable extends Thing {
   compileProgram (name, src) {
     this.machine.installProgram(name, { src: src, app: lang.parse(src) })
   }
-  installProgram (name, prorgam) {
-    this.machine.installProgram(name, prorgam)
+  installProgram (name, program) {
+    this.machine.installProgram(name, program)
   }
   command (command) {
     return this.machine.enqueue(command)
   }
   tick () {
     this.machine.tick()
-    return this.machine.execute()
+    this.execute()
+  }
+  execute () {
+    let res = this.machine.execute()
+    this._results = this._results.concat(res)
+  }
+  results () {
+    let r = this._results
+    this._results = []
+    return r
+  }
+}
+
+class Component extends Programmable {
+  constructor () {
+    super()
+    this.inputBus = []
+    this.outputBus = []
+    this.addOp('return', (m, s) => {
+      let [name, val] = [s.pop(), s.pop()]
+      this.outputBus.push([ 'output', name, val ])
+    })
+  }
+  control (cmd) {
+    return this.inputBus.push(cmd)
+  }
+  read () {
+    return this.outputBus.shift()
+  }
+  tick () {
+    let input = this.inputBus.shift()
+    if (input) {
+      // this is the component control protocol
+      switch (input[0]) {
+      case 'read': {
+        let name = input[1]
+        let value = this.memory.get(name)
+        this.outputBus.push([ 'read', name, value ])
+        break
+      }
+      case 'write': {
+        let name = input[1][0]
+        let value = input[1][1]
+        this.memory.set(name, value)
+        this.outputBus.push([ 'written', name ])
+        break
+      }
+      case 'queue':
+        if (this.command(input[1])) {
+          this.outputBus.push([ 'queued', input[1] ])
+        } else {
+          this.outputBus.push([ 'queuefull', input[1] ])
+        }
+        break
+      }
+    }
+    super.tick()
+    for (let r of this.results()) {
+      this.outputBus.push([ 'res', r ])
+    }
+  }
+  toString () {
+    return 'component'
   }
 }
 
@@ -89,12 +199,15 @@ class Composite extends Programmable {
     super(opts)
     this.slots = new Set()
     this.parts = new Map()
+    // where composed result is after tick
+    this.composition = null
     // tell as an op
     this.addOp('tell', (m, s) => {
       let [tgt, src] = [s.pop(), s.pop()]
       let part = this.parts.get(tgt)
       if (part) {
-        if (part.command(src)) {
+        let cmd = [ 'queue', src ]
+        if (part.control(cmd)) {
           s.push('ok')
         } else {
           s.push('overflow')
@@ -103,21 +216,24 @@ class Composite extends Programmable {
         s.push('no part')
       }
     })
+    // tell as an app
+    this.compileProgram('tell', '"argv" load split1 swap tell ;')
     // tell as a native program
-    this.installProgram('tell', { f: (m, args) => {
+    this.installProgram('tellx', { f: (m, args) => {
       if (args) {
-        let cx = split(args)
-        let part = this.parts.get(cx[0])
+        let [tgt, src] = split(args)
+        let part = this.parts.get(tgt)
         if (part) {
-          if (part.command(cx[1])) {
+          let cmd = [ 'queue', src ]
+          if (part.control(cmd)) {
             return {
               typ: 'debug',
-              val: 'command pushed to ' + cx[0]
+              val: 'command pushed to ' + tgt
             }
           } else {
             return {
               typ: 'error',
-              val: 'command overflow on ' + cx[0]
+              val: 'command overflow on ' + tgt
             }
           }
         }
@@ -148,20 +264,27 @@ class Composite extends Programmable {
     return true
   }
   tick () {
-    let r0 = super.tick()
+    super.tick()
+    this.parts.forEach((part, slot) => part.tick())
+    this.composition = this.compose()
+  }
+  compose () {
     let res = []
-    if (r0) {
-      for (let rx of r0) {
-        rx.src = 'self'
-        res.push(rx)
-      }
-    }
     this.parts.forEach((part, slot) => {
-      let r = part.tick()
-      if (r) {
-        for (let rx of r) {
-          rx.src = slot
-          res.push(rx)
+      let r = null
+      while ((r = part.read()) != null) {
+        if (r[0] === 'output') {
+          res.push({
+            typ: r[1],
+            src: slot,
+            val: r[2]
+          })
+        } else {
+          res.push({
+            typ: 'debug',
+            src: slot,
+            val: r
+          })
         }
       }
     })
@@ -169,13 +292,14 @@ class Composite extends Programmable {
       if (this.machine.hasProgram('compose')) {
         this.machine.setVariable('res', res)
         // TODO - this might overflow
-        this.command('compose')
-        this.machine.execute()
-        return null
+        this.command('compose res')
+        // TODO - this might not finish
+        this.execute()
+        return 'composed'
       }
       return res
     }
-    return []
+    return null
   }
   toString () {
     if (this.parts.size > 0) {
@@ -290,13 +414,7 @@ class World extends Area {
   }
 }
 
-class Component extends Programmable {
-  constructor () {
-    super()
-  }
-  toString () {
-    return 'component'
-  }
+class ArmCore1 {
 }
 
 class Arm1 extends Component {
@@ -337,41 +455,33 @@ class Arm1 extends Component {
       }
       s.push('not now')
     })
-    this.compileProgram('grab', 'grab ;')
-    this.compileProgram('ongrab', 'holding ;')
-    this.compileProgram('onmiss', '"missed!" ; ')
-    this.compileProgram('program' , 'program ;')
-    this.compileProgram('release', 'release ;')
-  }
-  command (command) {
-    if (this.grabbing > 0) {
-      return false
-    }
-    return super.command(command)
+    this.compileProgram('grab', 'grab "grab" return ;')
+    this.compileProgram('ongrab', 'holding "grabbed" return ;')
+    this.compileProgram('onmiss', '"missed" "missed" return ; ')
+    this.compileProgram('program' , 'program "programmed" return ;')
+    this.compileProgram('release', 'release "released" return ;')
   }
   tick () {
     if (this.grabbing > 0) {
       if ((--this.grabbing) == 0) {
         let near = this.area.visibleTo(this.piece)
         for (let e of near) {
-          if (e instanceof Piece) {
-            e.move(this)
-            super.command('ongrab')
+          if (e.e instanceof Piece) {
+            e.e.move(this)
+            this.command('ongrab')
             break
           }
         }
         if (this.holding == null) {
-          super.command('onmiss')
+          this.command('onmiss')
         }
-      } else {
-        return null
       }
     }
     // XXX - should things be entirely disabled when grabbed?
     // if (this.holding) {
     //   this.holding.tick()
     // }
-    return super.tick()
+    super.tick()
   }
   accept (piece) {
     assert(piece instanceof Piece)
@@ -393,20 +503,41 @@ class Arm1 extends Component {
   }
 }
 
+class ScannerCore1 {
+  scan (host) {
+    let near = host.area.visibleTo(host.piece)
+    let o = near.map(e => ({
+      x: e.x,
+      y: e.y,
+      size: e.e.size,
+      colour: e.e.colour
+    }))
+    return o
+  }
+}
+
 class Scanner1 extends Component {
   constructor () {
     super()
+    this.core = new ScannerCore1()
+    this.scanning = 0
+    this.timeToScan = 1
     this.addOp('scan', (m, s) => {
-      let near = this.area.visibleTo(this.piece)
-      let o = near.map(e => ({
-        x: e.x,
-        y: e.y,
-        size: e.e.size,
-        colour: e.e.colour
-      }))
-      s.push(JSON.stringify(o))
+      this.scanning = this.timeToScan
+      s.push('scanning')
     })
     this.compileProgram('scan', 'scan ;')
+    this.compileProgram('onscan', '"seen" load tojson "seen" return ;')
+  }
+  tick () {
+    if (this.scanning > 0) {
+      if ((--this.scanning) == 0) {
+        let o = this.core.scan(this)
+        this.machine.setVariable('seen', o)
+        this.command('onscan')
+      }
+    }
+    super.tick()
   }
   toString () {
     return 'scanner ' + super.toString()
@@ -450,65 +581,62 @@ class Player extends Piece {
       }
     } })
     this.installProgram('compose', { f: (m, args) => {
-      let res = m.getVariable('res')
+      let res = m.getVariable(args)
       // turn composite result into more user friendly things
       if (res) {
         let events = m.getVariable('out') || []
         for (let r of res) {
-          switch (r.src) {
-          case 'eye':
-            r.typ = 'seen'
-            r.src = 'self'
+          if (r.typ != 'debug') {
             events.push(r)
-            break
-          default:
-            events.push(r)
+          } else {
+            console.log('debug', r)
           }
         }
         m.setVariable('out', events)
       }
+      return 'ok'
     } })
   }
   startTick (commands) {
+    this.events = []
     if (commands) {
       for (let c of commands) {
         if (!this.command(c)) {
           this.events.push({
             typ: 'error',
-            val: `command overflow`
+            val: `command overflow`,
+            cmd: c
           })
         }
       }
     }
   }
   tick () {
-    let res = super.tick()
-    if (this.machine.cp0 > 0 && this.machine.hasProgram('idle')) {
-      this.command('idle')
-      let res2 = this.machine.execute()
-      if (res2) {
-        if (res) {
-          res = res.concat(res2)
-        } else {
-          res = res2
+    super.tick()
+    if (this.composition) {
+      if (this.composition === 'composed') {
+        // look for any events in memory
+        let out = this.machine.takeVariable('out')
+        if (out) {
+          this.events = this.events.concat(out)
         }
+      } else {
+        this.events = this.events.concat(this.composition)
       }
     }
+    if (this.machine.timeLeft > 0 && this.machine.hasProgram('idle')) {
+      this.command('idle')
+      this.execute()
+    }
+  }
+  endTick () {
+    let res = this.results()
     if (res) {
       for (let r of res) {
         this.events.push(r)
       }
     }
-  }
-  endTick () {
-    // look for any events in memory
-    let out = this.machine.takeVariable('out')
-    if (out) {
-      this.events = this.events.concat(out)
-    }
-    let oldEvents = this.events
-    this.events = []
-    return oldEvents
+    return this.events
   }
   toString () {
     return 'player ' + super.toString()
@@ -518,21 +646,33 @@ class Player extends Piece {
 class Robot1 extends Piece {
   constructor (name, colour) {
     super({ colour })
+    // internal state
     this.name = name
+    this.time = 0
     this.power = { x: 0, y: 0 }
+    // hardwired components
+    this.scanner = new ScannerCore1()
+    // ops
     this.machine.addOp('power', (m, s) => {
       let [y, x] = [s.pop(), s.pop()]
       this.power.x = x
       this.power.y = y
     })
+    this.machine.addOp('scan', (m, s) => {
+      let o = this.scanner.scan(this)
+      s.push(o)
+    })
+    // programs
     this.compileProgram('doodle', ':r 0 4 rand 2 - ; r r power ;')
+    this.compileProgram('explore', '1 ;')
   }
   setName (name) {
     this.name = name
   }
   tick () {
+    this.n++
     super.tick()
-    if (this.machine.cp0 > 0 && this.machine.hasProgram('idle')) {
+    if (this.machine.timeLeft > 0 && this.machine.hasProgram('idle')) {
       this.command('idle')
       this.machine.execute()
     }

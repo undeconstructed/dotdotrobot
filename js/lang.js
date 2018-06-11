@@ -1,6 +1,8 @@
 
 // docker run -it --rm -v $PWD:/js node /usr/local/bin/node /js/lang.js
 
+import { split } from './util.js'
+
 const STRING = Symbol('string')
 const NUMBER = Symbol('number')
 const WORD = Symbol('word')
@@ -209,14 +211,6 @@ const ops = {
   'clear': (m, s) => {
     s.length = 0
   },
-  'store': (m, s) => {
-    let [name, data] = [s.pop(), s.pop()]
-    m[name] = data
-  },
-  'read': (m, s) => {
-    name = s.pop()
-    s.push(m[name])
-  },
   'print': (m, s) => {
     let v = s.pop()
     console.log(v)
@@ -226,6 +220,25 @@ const ops = {
     let [max, min] = [s.pop(), s.pop()]
     let r = Math.floor(Math.random() * (max - min + 1)) + min
     s.push(r)
+  },
+  'split': (m, s) => {
+    let arg = s.pop()
+    let args = s.split()
+    for (let a of args) {
+      s.push(a)
+    }
+    s.push(s.length)
+  },
+  'split1': (m, s) => {
+    let arg = s.pop()
+    let args = split(arg)
+    for (let a of args) {
+      s.push(a)
+    }
+  },
+  'tojson': (m, s) => {
+    let j = JSON.stringify(s.pop())
+    s.push(j)
   }
 }
 
