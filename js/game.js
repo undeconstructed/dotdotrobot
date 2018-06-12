@@ -149,15 +149,13 @@ class Composite extends Programmable {
       let args = popArgs(s, ['data', 'tgt', 'name'])
       let part = this.parts.get(args.tgt)
       if (part) {
-        let cmd = [ 'write', [ name, data ] ]
+        let cmd = [ 'write', [ args.name, args.data ] ]
         part.socket.send(cmd)
         s.push('ok')
       } else {
         s.push('no part')
       }
     })
-    // tell as an app
-    this.compileWord('tell', '"argv" load split1 swap tell ;')
   }
   addSlot (name) {
     this.slots.add(name)
@@ -346,6 +344,9 @@ class Arm1 extends Component {
     this.addHardWord('release', (m, s) => {
       // let owner = this.piece
       if (this.holding) {
+        if (this.holding.socket) {
+          this.holding.socket.unplug()
+        }
         this.holding.move(this.area, this.holding.position)
         s.push('ok')
       } else {
@@ -353,7 +354,11 @@ class Arm1 extends Component {
       }
     })
     this.addHardWord('holding', (m, s) => {
-      s.push(this.holding.toString())
+      if (this.holding) {
+        s.push(this.holding.toString())
+      } else {
+        s.push('nothing')
+      }
     })
     this.addHardWord('tell', (m, s) => {
       let src = s.pop()
@@ -363,14 +368,31 @@ class Arm1 extends Component {
           // XXX - is this right place to compile?
           let app = lang.parse(src)
           let cmd = [ 'queue', [ null, app ] ]
-          socket.plug(this)
           socket.send(cmd)
-          socket.unplug()
           s.push('ok')
+          return
+        } else {
+          s.push('no socket')
           return
         }
       }
-      s.push('not now')
+      s.push('not holding anything!')
+    })
+    this.addHardWord('copy', (m, s) => {
+      let args = popArgs(s, ['data', 'name'])
+      if (this.holding) {
+        let socket = this.holding.socket
+        if (socket) {
+          let cmd = [ 'write', [ args.name, args.data ] ]
+          socket.send(cmd)
+          s.push('ok')
+          return
+        } else {
+          s.push('no socket')
+          return
+        }
+      }
+      s.push('not holding anything!')
     })
     this.compileWord('do-grab', 'grab "grab" return ;')
     this.compileWord('ongrab', 'holding "grabbed" return ;')
@@ -385,6 +407,9 @@ class Arm1 extends Component {
         for (let e of near) {
           if (e.e instanceof Piece) {
             e.e.move(this)
+            if (this.holding.socket) {
+              this.holding.socket.plug(this)
+            }
             this.command({ src: 'ongrab' })
             break
           }
@@ -595,7 +620,7 @@ class Robot1 extends Piece {
     this.n++
     super.tick()
     if (this.machine.timeLeft > 0 && this.machine.hasWord('idle')) {
-      this.command({ src: 'idle'})
+      this.command({ src: 'idle' })
       this.machine.execute()
     }
     this.motion = { x: this.power.x, y: this.power.y }

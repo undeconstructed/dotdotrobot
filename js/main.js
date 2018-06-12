@@ -156,7 +156,7 @@ class Input extends Cell {
     inputBox.innerHTML = '<form><input type="text" placeholder="$ ..."></form>'
     this.element.appendChild(inputBox)
     this.entry = new Entry(this, inputBox)
-    this.n = 0
+    this.n = 1
   }
   issue (src) {
     let cmd = {
@@ -237,7 +237,7 @@ class Entry {
       e.stopPropagation()
       let line = this.i.value
       if (line) {
-        line.split(';').forEach(cmd => this.parent.issue(cmd))
+        this.parent.issue(line)
       }
       this.i.value = ''
     })

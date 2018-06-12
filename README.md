@@ -61,38 +61,12 @@ There are robots, for example, that you can grab and program, but then they are
 on their own until they come back. Assuming you have programmed them to come
 back.
 
-## the environment
-
-You can send commands to a machine. That machine will run them, and send back
-answers. This all happens asynchronously as far as the game is concerned.
-
-Each command is a program to run, and some args, in a very basic form:
-
-`prog args are not parsed, this is all just passed on`
-
-The programs available are those installed. You can run `list-programs` to see
-them. Programs are either native, meaning they deal with the specifics of the
-"hardware", or are written in the little language these machine understand.
-
-Programs can be installed, replaced etc.
-
-The player machine is in fact a composite machine. It has a special command
-called "tell" which passes on a command to component. One component installed
-at the start is called "eye", try:
-
-`tell eye scan`
-
-The will run a command called "scan" on the eye, in the same way as you can
-directly run commands on the player. In fact, all machines in the game use the
-same core, and so run in basically the same way.
-
 ## the language
 
 The programming language of the machines is a little FORTH-like thing. You can
-either compile programs and install them, or there is a script program
-pre-installed for one offs. Try:
+either compile programs and install them, or just run them directly. Try:
 
-`script 1 2 +`
+`1 2 +`
 
 That should return 3, hopefully. Of course it may take a moment if there is
 processing to do, but it will appear in the events view soon enough.
@@ -101,21 +75,72 @@ Disclaimer:  I don't know FORTH. I chose it because it seemed to be simple to
 implement, and not need a grammar. I used [https://github.com/eatonphil/jsforth]
 as a spec, but didn't look at the code, as I wanted to do it all myself.
 
-Most programs are actually just wrappers around special, hardware specific, ops.
-The above "tell" program actually has just a couple of lines, ending with the
-"tell" op, which is specific to composite machines. Sending commands to
-components can thus be easily done within the language, e.g.:
+## the machines
 
-`script "scan" "eye" tell`
+Explain the machines.
 
-That is actually the source of the "look" program that is pre-installed in the
-player.
+## the environment
+
+You can send commands to a machine. That machine will run them, and send back
+answers. This all happens asynchronously as far as the game is concerned.
+Everything is in the same language, the command shell actually compiles your
+input into a program and runs it once.
+
+Apps can call any word that is installed.
+
+Everything is a FORTH word, either a compiled app, or a native piece of hardware
+functionality.
+
+## the player machine
+
+The player machine is in fact a composite machine. It has a special word
+called "tell" which passes on a script to a component. One component installed
+at the start is called "eye", try:
+
+`"scan" "eye" tell`
+
+The will run a word called "scan" on the eye, in the same way as you can
+directly run words on the player machine. In fact, all machines in the game use the
+same core, and so run in basically the same way.
+
+## try me
+
+```
+# compile a little test program
+`"testing" dup log` "test" compile
+# try running it
+test
+# load it onto the stack and copy it to the arm component
+"test" load "arm-1" "armtest" copy
+# tell the arm to run it
+`armtest` "arm-1" tell
+```
+
+```
+# look around
+look
+# tell look to run all the time
+"look" "idle" compile
+# the program the robot will run
+`:r 0 4 rand 2 - ; r r power "ok" log ;` "robrun" compile
+# program to copy from arm to robot
+`"robrun" load "idle" copy` "copy-robrun" compile
+# copy them to the arm
+"robrun" load "arm-1" "robrun" copy
+"copy-robrun" load "arm-1" "copy-robrun" copy
+# catch a robot
+"grab" "arm-1" tell
+# copy the run program to the robot
+`copy-robrun` "arm-1" tell
+# release the robot
+"release" "arm-1" tell
+# is it moving?
+```
 
 ## TODO
 
 Almost everything.
 
 * The actual game for one thing.
-* Implement the programming language.
 * Persistence.
 * Maybe put the simulation into a worker.

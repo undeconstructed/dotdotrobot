@@ -4,6 +4,7 @@
 import { split } from './util.js'
 
 const STRING = Symbol('string')
+const LSTRING = Symbol('lstring')
 const NUMBER = Symbol('number')
 const WORD = Symbol('word')
 const DEF = Symbol('def`')
@@ -41,6 +42,7 @@ function parse (s) {
 
   let n = ''
   let i = null
+  let escaped = false
 
   for (let c of s) {
     if (!i) {
@@ -61,6 +63,9 @@ function parse (s) {
       } else if (c === '"') {
         i = STRING
         n = ''
+      } else if (c === '`') {
+        i = LSTRING
+        n = ''
       } else if (c === ' ') {
       } else {
         i = WORD
@@ -69,13 +74,34 @@ function parse (s) {
     } else {
       switch (i) {
       case STRING:
+        if (c === '\\' && !escaped) {
+          escaped = true
+          break
+        }
+        if (escaped) {
+          escaped = false
+          if (c === '"' || c === '\\') {
+            n += c
+          }
+          break
+        }
         if (c === '"') {
           frame.symbols.push({
             t: i,
             v: n
           })
           i = null
-        } else if (c === '\\') {
+        } else {
+          n += c
+        }
+        break
+      case LSTRING:
+        if (c === '`') {
+          frame.symbols.push({
+            t: STRING,
+            v: n
+          })
+          i = null
         } else {
           n += c
         }
