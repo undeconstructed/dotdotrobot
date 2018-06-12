@@ -150,19 +150,25 @@ class Input extends Cell {
     let historyBox = document.createElement('div')
     historyBox.classList.add('box')
     historyBox.classList.add('history')
-    this.history = new Console(historyBox, e => `[${timeF(e.n)}] ${e.cmd}`, e => { this.issue(e.cmd) })
+    this.history = new Console(historyBox, e => `[${e.id}][${timeF(e.time)}] ${e.src}`, e => { this.issue(e.src) })
     this.element.appendChild(historyBox)
     let inputBox = document.createElement('div')
     inputBox.innerHTML = '<form><input type="text" placeholder="$ ..."></form>'
     this.element.appendChild(inputBox)
     this.entry = new Entry(this, inputBox)
+    this.n = 0
   }
-  issue (cmd) {
+  issue (src) {
+    let cmd = {
+      id: this.n++,
+      src: src
+    }
     runner.command(cmd)
     this.memo(cmd)
   }
   memo (cmd) {
-    this.history.add({ n: new Date(), cmd: cmd })
+    cmd.time = new Date()
+    this.history.add(cmd)
   }
   focus () {
     this.entry.focus()
@@ -292,8 +298,8 @@ let tick = function() {
         state.update(e.val)
         break
       default:
+        events.add(e)
       }
-      events.add(e)
     }
   }
   window.requestAnimationFrame(tick)

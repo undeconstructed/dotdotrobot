@@ -1,5 +1,5 @@
 
-import { assert, split, join, distance } from './util.js'
+import { assert, split, join, distance, popArgs } from './util.js'
 import * as random from './random.js'
 import Machine from './machine.js'
 import * as lang from './lang.js'
@@ -55,76 +55,22 @@ class Programmable extends Thing {
     // results of execution
     this._results = []
     // universally installed programs
-    this.addOp('log', (m, s) => {
+    this.addHardWord('log', (m, s) => {
       console.log('log', s.pop())
     })
-    // default programs
-    this.installProgram('delete', { f: (m, args) => {
-      m.takeVariable(args)
-    }})
-    this.installProgram('install', { f: (m, args) => {
-      // this compiles and installs a program
-      let [name, src] = split(args)
-      let app = null
-      try {
-        app = lang.parse(src)
-      } catch (e) {
-        return {
-          typ: 'error',
-          val: 'can\'t compile: ' + e
-        }
-      }
-      this.installProgram(name, { app, src })
-      return 'ok'
-    } })
-    this.installProgram('script', { f: (m, args) => {
-      // this is a dynamicly inputted program
-      let src = args
-      let app = null
-      try {
-        app = lang.parse(src)
-      } catch (e) {
-        return {
-          typ: 'error',
-          val: 'can\'t compile: ' + e
-        }
-      }
-      try {
-        // XXX - this may run out of runtime
-        let { res, used } = lang.run(app, { m: this.memory, ops: this.ops, runFor: this.cp0 })
-        this.cp0 -= used
-        return {
-          typ: 'res',
-          val: res
-        }
-      } catch (e) {
-        return {
-          typ: 'error',
-          val: 'crash: ' + e
-        }
-      }
-    }})
-    this.installProgram('list-programs', { f: (m, args) => {
-      return m.listPrograms()
-    } })
-    this.installProgram('dump-program', { f: (m, args) => {
-      return m.describeProgram(args)
-    } })
-    this.installProgram('describe', { f: (m, args) => {
-      return this.toString()
-    } })
+    this.addHardWord('describe', (m, s) => {
+      s.push(this.toString())
+    })
   }
-  addOp (name, func) {
-    this.machine.addOp(name, func)
+  addHardWord (name, func) {
+    this.machine.addHardWord(name, func)
   }
-  compileProgram (name, src) {
-    this.machine.installProgram(name, { src: src, app: lang.parse(src) })
+  compileWord (name, src) {
+    this.machine.installWord(name, { src: src, app: lang.parse(src) })
   }
-  installProgram (name, program) {
-    this.machine.installProgram(name, program)
-  }
-  command (command) {
-    return this.machine.enqueue(command)
+  command (cmd) {
+    cmd.app = lang.parse(cmd.src)
+    return this.machine.enqueue(cmd)
   }
   tick () {
     this.machine.tick()
@@ -144,49 +90,19 @@ class Programmable extends Thing {
 class Component extends Programmable {
   constructor () {
     super()
-    this.inputBus = []
-    this.outputBus = []
-    this.addOp('return', (m, s) => {
+    this.socket0 = this.machine.newSocket()
+    this.addHardWord('return', (m, s) => {
       let [name, val] = [s.pop(), s.pop()]
-      this.outputBus.push([ 'output', name, val ])
+      this.socket0.push([ 'output', name, val ])
     })
   }
-  control (cmd) {
-    return this.inputBus.push(cmd)
-  }
-  read () {
-    return this.outputBus.shift()
+  get socket () {
+    return this.socket0
   }
   tick () {
-    let input = this.inputBus.shift()
-    if (input) {
-      // this is the component control protocol
-      switch (input[0]) {
-      case 'read': {
-        let name = input[1]
-        let value = this.memory.get(name)
-        this.outputBus.push([ 'read', name, value ])
-        break
-      }
-      case 'write': {
-        let name = input[1][0]
-        let value = input[1][1]
-        this.memory.set(name, value)
-        this.outputBus.push([ 'written', name ])
-        break
-      }
-      case 'queue':
-        if (this.command(input[1])) {
-          this.outputBus.push([ 'queued', input[1] ])
-        } else {
-          this.outputBus.push([ 'queuefull', input[1] ])
-        }
-        break
-      }
-    }
     super.tick()
     for (let r of this.results()) {
-      this.outputBus.push([ 'res', r ])
+      this.socket0.push([ 'res', r ])
     }
   }
   toString () {
@@ -201,13 +117,25 @@ class Composite extends Programmable {
     this.parts = new Map()
     // where composed result is after tick
     this.composition = null
-    // tell as an op
-    this.addOp('tell', (m, s) => {
+    // hardware functions
+    this.addHardWord('list-slots', (m, s) => {
+      return [...this.slots]
+    })
+    this.addHardWord('list-parts', (m, s) => {
+      let list = {}
+      this.parts.forEach((v, k) => {
+        list[k] = v.toString()
+      })
+      return list
+    })
+    this.addHardWord('tell', (m, s) => {
       let [tgt, src] = [s.pop(), s.pop()]
       let part = this.parts.get(tgt)
       if (part) {
-        let cmd = [ 'queue', src ]
-        if (part.control(cmd)) {
+        // XXX - is this right place to compile?
+        let app = lang.parse(src)
+        let cmd = [ 'queue', [ null, app ] ]
+        if (part.socket.send(cmd)) {
           s.push('ok')
         } else {
           s.push('overflow')
@@ -216,40 +144,20 @@ class Composite extends Programmable {
         s.push('no part')
       }
     })
-    // tell as an app
-    this.compileProgram('tell', '"argv" load split1 swap tell ;')
-    // tell as a native program
-    this.installProgram('tellx', { f: (m, args) => {
-      if (args) {
-        let [tgt, src] = split(args)
-        let part = this.parts.get(tgt)
-        if (part) {
-          let cmd = [ 'queue', src ]
-          if (part.control(cmd)) {
-            return {
-              typ: 'debug',
-              val: 'command pushed to ' + tgt
-            }
-          } else {
-            return {
-              typ: 'error',
-              val: 'command overflow on ' + tgt
-            }
-          }
-        }
+    this.addHardWord('copy', (m, s) => {
+      // let [data, tgt, name] = [s.pop(), s.pop(), s.pop()]
+      let args = popArgs(s, ['data', 'tgt', 'name'])
+      let part = this.parts.get(args.tgt)
+      if (part) {
+        let cmd = [ 'write', [ name, data ] ]
+        part.socket.send(cmd)
+        s.push('ok')
+      } else {
+        s.push('no part')
       }
-      return 'error'
-    } })
-    this.installProgram('list-slots', { f: (m, args) => {
-      return [...this.slots]
-    } })
-    this.installProgram('list-parts', { f: (m, args) => {
-      let list = {}
-      this.parts.forEach((v, k) => {
-        list[k] = v.toString()
-      })
-      return list
-    } })
+    })
+    // tell as an app
+    this.compileWord('tell', '"argv" load split1 swap tell ;')
   }
   addSlot (name) {
     this.slots.add(name)
@@ -261,6 +169,7 @@ class Composite extends Programmable {
     }
     this.parts.set(opts.slot, component)
     component.parent = this
+    component.socket.plug(this)
     return true
   }
   tick () {
@@ -272,7 +181,7 @@ class Composite extends Programmable {
     let res = []
     this.parts.forEach((part, slot) => {
       let r = null
-      while ((r = part.read()) != null) {
+      while ((r = part.socket.recv()) != null) {
         if (r[0] === 'output') {
           res.push({
             typ: r[1],
@@ -289,11 +198,10 @@ class Composite extends Programmable {
       }
     })
     if (res.length > 0) {
-      if (this.machine.hasProgram('compose')) {
+      if (this.machine.hasWord('compose')) {
         this.machine.setVariable('res', res)
         // TODO - this might overflow
-        this.command('compose res')
-        // TODO - this might not finish
+        this.command({ src: '"res" compose' })
         this.execute()
         return 'composed'
       }
@@ -423,7 +331,7 @@ class Arm1 extends Component {
     this.howLongToGrab = 3
     this.grabbing = 0
     this.holding = null
-    this.addOp('grab', (m, s) => {
+    this.addHardWord('grab', (m, s) => {
       if (this.holding) {
         s.push('already holding!')
         return
@@ -435,31 +343,40 @@ class Arm1 extends Component {
       }
       s.push('already grabbing!')
     })
-    this.addOp('release', (m, s) => {
+    this.addHardWord('release', (m, s) => {
       // let owner = this.piece
       if (this.holding) {
         this.holding.move(this.area, this.holding.position)
-        s.push('released')
+        s.push('ok')
       } else {
         s.push('not holding anything!')
       }
     })
-    this.addOp('holding', (m, s) => {
+    this.addHardWord('holding', (m, s) => {
       s.push(this.holding.toString())
     })
-    this.addOp('program', (m, s) => {
+    this.addHardWord('tell', (m, s) => {
+      let src = s.pop()
       if (this.holding) {
-        this.holding.installProgram('idle', { alias: 'doodle' })
-        s.push('programmed')
-        return
+        let socket = this.holding.socket
+        if (socket) {
+          // XXX - is this right place to compile?
+          let app = lang.parse(src)
+          let cmd = [ 'queue', [ null, app ] ]
+          socket.plug(this)
+          socket.send(cmd)
+          socket.unplug()
+          s.push('ok')
+          return
+        }
       }
       s.push('not now')
     })
-    this.compileProgram('grab', 'grab "grab" return ;')
-    this.compileProgram('ongrab', 'holding "grabbed" return ;')
-    this.compileProgram('onmiss', '"missed" "missed" return ; ')
-    this.compileProgram('program' , 'program "programmed" return ;')
-    this.compileProgram('release', 'release "released" return ;')
+    this.compileWord('do-grab', 'grab "grab" return ;')
+    this.compileWord('ongrab', 'holding "grabbed" return ;')
+    this.compileWord('onmiss', '"missed" "missed" return ; ')
+    this.compileWord('do-tell' , 'program "programmed" return ;')
+    this.compileWord('do-release', 'release "released" return ;')
   }
   tick () {
     if (this.grabbing > 0) {
@@ -468,19 +385,20 @@ class Arm1 extends Component {
         for (let e of near) {
           if (e.e instanceof Piece) {
             e.e.move(this)
-            this.command('ongrab')
+            this.command({ src: 'ongrab' })
             break
           }
         }
         if (this.holding == null) {
-          this.command('onmiss')
+          this.command({ src: 'onmiss' })
         }
       }
     }
-    // XXX - should things be entirely disabled when grabbed?
-    // if (this.holding) {
-    //   this.holding.tick()
-    // }
+    if (this.holding) {
+      this.holding.tick()
+      // stop the thing dead
+      this.holding.motion = null
+    }
     super.tick()
   }
   accept (piece) {
@@ -522,19 +440,21 @@ class Scanner1 extends Component {
     this.core = new ScannerCore1()
     this.scanning = 0
     this.timeToScan = 1
-    this.addOp('scan', (m, s) => {
+    this.addHardWord('scan', (m, s) => {
       this.scanning = this.timeToScan
       s.push('scanning')
     })
-    this.compileProgram('scan', 'scan ;')
-    this.compileProgram('onscan', '"seen" load tojson "seen" return ;')
+    this.compileWord('do-scan', 'scan ;')
+    this.compileWord('onscan', '"seen" load tojson "seen" return ;')
   }
   tick () {
     if (this.scanning > 0) {
       if ((--this.scanning) == 0) {
         let o = this.core.scan(this)
         this.machine.setVariable('seen', o)
-        this.command('onscan')
+        if (this.machine.hasWord('onscan')) {
+          this.command({ src: 'onscan' })
+        }
       }
     }
     super.tick()
@@ -556,46 +476,44 @@ class Player extends Piece {
     // some default components
     this.accept(new Arm1(), { slot: 'arm-1' })
     this.accept(new Scanner1(), { slot: 'eye' })
-    // some default programs
-    this.compileProgram('sample', '1 2 + ;')
-    this.compileProgram('help', '"try typing list-programs" ;"')
-    this.compileProgram('look', '"scan" "eye" tell ;')
-    this.compileProgram('grab', '"grab" "arm-1" tell ;')
-    this.installProgram('set-idle', { f: (m, args) => {
-      let prog = args ? args.trim() : null
-      if (prog) {
-        this.installProgram('idle', { alias: prog })
-      } else {
-        this.installProgam('idle', null)
-      }
-      return 'ok'
-    } })
-    this.installProgram('state', { f: (m, args) => {
-      return {
+    this.addHardWord('state', (m, s) => {
+      s.push({
         typ: 'state',
         val: {
           position: this.position,
           power: [100, 100],
           wear: [10, 100]
         }
-      }
-    } })
-    this.installProgram('compose', { f: (m, args) => {
-      let res = m.getVariable(args)
+      })
+    })
+    // XXX - only exists because can't write this as app
+    this.addHardWord('compose0', (m, s) => {
+      let res = m.get(s.pop())
       // turn composite result into more user friendly things
       if (res) {
-        let events = m.getVariable('out') || []
+        let events = m.get('out') || []
         for (let r of res) {
-          if (r.typ != 'debug') {
-            events.push(r)
-          } else {
+          if (r.typ === 'res') {
+            if (r.id) {
+              events.push(r)
+            }
+          } else if (r.typ === 'debug') {
             console.log('debug', r)
+          } else {
+            events.push(r)
           }
         }
-        m.setVariable('out', events)
+        m.set('out', events)
       }
-      return 'ok'
-    } })
+      s.push('ok')
+    })
+    // some default programs
+    this.compileWord('sample', '1 2 + ;')
+    this.compileWord('help', '"try typing list-programs" ;"')
+    this.compileWord('look', '"scan" "eye" tell ;')
+    this.compileWord('grab', '"grab" "arm-1" tell ;')
+    this.compileWord('set-idle', '"idle" compile ;')
+    this.compileWord('compose', 'compose0 ;')
   }
   startTick (commands) {
     this.events = []
@@ -605,7 +523,7 @@ class Player extends Piece {
           this.events.push({
             typ: 'error',
             val: `command overflow`,
-            cmd: c
+            cmd: c.id
           })
         }
       }
@@ -615,17 +533,18 @@ class Player extends Piece {
     super.tick()
     if (this.composition) {
       if (this.composition === 'composed') {
-        // look for any events in memory
+        // look for any composed events in memory
         let out = this.machine.takeVariable('out')
         if (out) {
           this.events = this.events.concat(out)
         }
       } else {
+        // else events direct from components
         this.events = this.events.concat(this.composition)
       }
     }
-    if (this.machine.timeLeft > 0 && this.machine.hasProgram('idle')) {
-      this.command('idle')
+    if (this.machine.timeLeft > 0 && this.machine.hasWord('idle')) {
+      this.command({ src: 'idle' })
       this.execute()
     }
   }
@@ -633,7 +552,9 @@ class Player extends Piece {
     let res = this.results()
     if (res) {
       for (let r of res) {
-        this.events.push(r)
+        if (r.id) {
+          this.events.push(r)
+        }
       }
     }
     return this.events
@@ -647,39 +568,43 @@ class Robot1 extends Piece {
   constructor (name, colour) {
     super({ colour })
     // internal state
-    this.name = name
+    this.socket0 = this.machine.newSocket()
+    this.machine.setVariable('name', name)
     this.time = 0
     this.power = { x: 0, y: 0 }
     // hardwired components
     this.scanner = new ScannerCore1()
     // ops
-    this.machine.addOp('power', (m, s) => {
+    this.machine.addHardWord('power', (m, s) => {
       let [y, x] = [s.pop(), s.pop()]
       this.power.x = x
       this.power.y = y
     })
-    this.machine.addOp('scan', (m, s) => {
+    this.machine.addHardWord('scan', (m, s) => {
       let o = this.scanner.scan(this)
       s.push(o)
     })
     // programs
-    this.compileProgram('doodle', ':r 0 4 rand 2 - ; r r power ;')
-    this.compileProgram('explore', '1 ;')
+    this.compileWord('doodle', ':r 0 4 rand 2 - ; r r power ;')
+    this.compileWord('explore', '1 ;')
   }
-  setName (name) {
-    this.name = name
+  get socket () {
+    return this.socket0
   }
   tick () {
     this.n++
     super.tick()
-    if (this.machine.timeLeft > 0 && this.machine.hasProgram('idle')) {
-      this.command('idle')
+    if (this.machine.timeLeft > 0 && this.machine.hasWord('idle')) {
+      this.command({ src: 'idle'})
       this.machine.execute()
     }
     this.motion = { x: this.power.x, y: this.power.y }
+    for (let r of this.results()) {
+      this.socket0.push([ 'res', r ])
+    }
   }
   toString () {
-    return `${this.colour} robot '${this.name}' ` + super.toString()
+    return `${this.colour} robot '${this.machine.getVariable('name')}' ` + super.toString()
   }
 }
 

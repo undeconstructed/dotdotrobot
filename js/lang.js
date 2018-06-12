@@ -144,7 +144,7 @@ function parse (s) {
   return apps
 }
 
-const ops = {
+export const ops = {
   '+': (m, s) => {
     let [a, b] = [s.pop(), s.pop()]
     s.push(a + b)
@@ -229,12 +229,10 @@ const ops = {
     }
     s.push(s.length)
   },
-  'split1': (m, s) => {
+  'join': (m, s) => {
     let arg = s.pop()
-    let args = split(arg)
-    for (let a of args) {
-      s.push(a)
-    }
+    let string = arg.join(',')
+    s.push(string)
   },
   'tojson': (m, s) => {
     let j = JSON.stringify(s.pop())
@@ -244,12 +242,13 @@ const ops = {
 
 function run (p, opts) {
   opts = opts || {}
-  p = p || opts.p
+  p = p || opts.frame.a
   let s = opts.s = opts.s || []
   let m = opts.m = opts.m || {}
-  let cOps = opts.ops = opts.ops || {}
+  let cOps = opts.extraOps = opts.extraOps || {}
+  let loadWord = opts.loadWord = opts.loadWord || (name => null)
   let runFor = opts.runFor = opts.runFor || -1
-  let frame = opts.frame || ({ f: p['main'], n: 0, parent: null })
+  let frame = opts.frame || ({ a: p, f: p['main'], n: 0, parent: null })
 
   let opsRun = 0
   let paused = false
@@ -271,17 +270,17 @@ function run (p, opts) {
     } else if (c.t === IF) {
       let b = s.pop()
       if (b) {
-        let sub = p[c.v]
+        let sub = frame.a[c.v]
         // console.log('enter if', c.v)
-        frame = { f: sub, n: 0, parent: frame }
+        frame = { a: frame.a, f: sub, n: 0, parent: frame }
       }
     } else if (c.t === LOOP) {
       let [b, a] = [s.pop(), s.pop()]
       let times = a - b
       if (times > 0) {
-        let sub = p[c.v]
+        let sub = frame.a[c.v]
         // console.log('enter loop', c.v, times)
-        frame = { f: sub, n: 0, parent: frame, times: times }
+        frame = { a: frame.a, f: sub, n: 0, parent: frame, times: times }
       }
     } else if (c.t === WORD) {
       let op = ops[c.v]
@@ -292,13 +291,20 @@ function run (p, opts) {
         if (op) {
           op(m, s)
         } else {
-          let sub = p[c.v]
-          if (!sub) {
-            s.push('NOSUB ' + c.v)
-            break
+          let sub = frame.a[c.v]
+          if (sub) {
+            // console.log('enter sub', c.v)
+            frame = { a: frame.a, f: sub, n: 0, parent: frame }
+          } else {
+            let ext = loadWord(c.v)
+            if (ext) {
+              // console.log('enter ext', c.v)
+              frame = { a: ext.app, f: ext.app['main'], n: 0, parent: frame }
+            } else {
+              s.push('NOWORD ' + c.v)
+              break
+            }
           }
-          // console.log('enter sub', c.v)
-          frame = { f: sub, n: 0, parent: frame }
         }
       }
     } else {

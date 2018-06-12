@@ -4,6 +4,7 @@ import * as lang from './lang.js'
 
 const Q = Symbol('q')
 
+// Memory looks after the memory in a Machine
 class Memory {
   constructor() {
     this.m = new Map()
@@ -25,6 +26,76 @@ class Memory {
   }
 }
 
+// Socket allows fairly direct remote access into a Machine
+class Socket {
+  constructor (machine) {
+    this.machine = machine
+    this.into = null
+    this.inputBus = []
+    this.outputBus = []
+  }
+  // for the external part
+  plug (into) {
+    this.into = into
+  }
+  send (cmd) {
+    if (!this.into) {
+      return
+    }
+    return this.inputBus.push(cmd)
+  }
+  recv () {
+    if (!this.into) {
+      return
+    }
+    return this.outputBus.shift()
+  }
+  unplug () {
+    this.into = null
+  }
+  // for the internal part
+  push (res) {
+    if (!this.into) {
+      return
+    }
+    this.outputBus.push(res)
+  }
+  tick () {
+    if (!this.into) {
+      return
+    }
+    let input = this.inputBus.shift()
+    if (input) {
+      // this is the component control protocol
+      switch (input[0]) {
+      case 'read': {
+        let name = input[1]
+        let value = this.machine.memory.get(name)
+        this.outputBus.push([ 'read', name, value ])
+        break
+      }
+      case 'write': {
+        let name = input[1][0]
+        let value = input[1][1]
+        this.machine.memory.set(name, value)
+        this.outputBus.push([ 'written', name ])
+        break
+      }
+      case 'queue':
+        let id = input[1][0]
+        let app = input[1][1]
+        if (this.machine.enqueue({ id, app })) {
+          this.outputBus.push([ 'queued', id ])
+        } else {
+          this.outputBus.push([ 'queuefull', id ])
+        }
+        break
+      }
+    }
+  }
+}
+
+// Machine is sort of a computer
 export default class Machine {
   constructor (cps, maxPrograms, queueSize, memorySize) {
     this.cps = cps
@@ -32,14 +103,47 @@ export default class Machine {
     this.maxPrograms = maxPrograms
     this.queueSize = queueSize
     this.memory = new Memory(memorySize)
-    this.ops = {}
+    this.hardWords = {}
     this.execution = null
-    // machine level ops
-    this.addOp('store', (m, s) => {
+    this.sockets = []
+    // machine level hardWords
+    this.addHardWord('compile', (m, s) => {
+      // this compiles and installs a program
+      let [name, src] = [s.pop(), s.pop()]
+      let app = null
+      try {
+        app = lang.parse(src)
+      } catch (e) {
+        return {
+          typ: 'error',
+          val: 'can\'t compile: ' + e
+        }
+      }
+      this.installWord(name, { app, src })
+      s.push('ok')
+    })
+    this.addHardWord('queue', (m, s) => {
+      let src = s.pop()
+      this.enqueue({ src })
+    })
+    this.addHardWord('list-words', (m, s) => {
+      let l = this.listOps().concat(this.listHardWords()).concat(this.listWords())
+      s.push(l)
+    })
+    this.addHardWord('describe-word', (m, s) => {
+      let name = s.pop()
+      let d = this.describeWord(name)
+      s.push(d)
+    })
+    this.addHardWord('delete', (m, s) => {
+      let k = s.pop()
+      m.delete(k)
+    })
+    this.addHardWord('store', (m, s) => {
       let [name, data] = [s.pop(), s.pop()]
       m.set(name, data)
     })
-    this.addOp('load', (m, s) => {
+    this.addHardWord('load', (m, s) => {
       let name = s.pop()
       let data = m.get(name)
       s.push(data)
@@ -47,51 +151,63 @@ export default class Machine {
     // default memory
     this.memory.set(Q, [])
   }
-  addOp (name, func) {
-    this.ops[name] = func
+  newSocket () {
+    let s = new Socket(this)
+    this.sockets.push(s)
+    return s
+  }
+  addHardWord (name, func) {
+    this.hardWords[name] = func
   }
   get timeLeft () {
     return this.cp0
   }
-  installProgram (name, program) {
-    if (!program) {
+  installWord (name, word) {
+    if (!word) {
       this.memory.delete(name)
+      return
     }
-    program.isProgram = true
-    return this.memory.set(name, program)
+    word.isWord = true
+    return this.memory.set(name, word)
   }
-  hasProgram (name) {
+  hasWord (name) {
     let data = this.memory.get(name)
-    return data && data.isProgram
+    return data && data.isWord
   }
-  listPrograms () {
+  listOps () {
+    return Object.keys(lang.ops)
+  }
+  listHardWords () {
+    return Object.keys(this.hardWords)
+  }
+  listWords () {
     let out = []
     for (let [k, v] of this.memory.entries()) {
-      if (v && v.isProgram) {
+      if (v && v.isWord) {
         out.push(k)
       }
     }
     return out
   }
-  describeProgram (name) {
+  describeWord (name) {
+    let op = lang.ops[name]
+    if (op) {
+      return 'op'
+    }
+    let hardWord = this.hardWords[name]
+    if (hardWord) {
+      return 'hard'
+    }
     let p = this.memory.get(name)
     if (p) {
-      if (p.f) {
-        return 'native'
-      } else if (p.c) {
-        return 'constant: ' + p.c
-      } else if (p.alias) {
-        return 'alias: ' + p.alias
-      } else if (p.app) {
-        return 'app: ' + (p.src || p.app)
-      }
+      return p.src
     }
     return 'unknown'
   }
-  enqueue (command) {
+  enqueue (cmd) {
     let q = this.memory.get(Q)
     if (q.length < this.queueSize) {
-      q.push(command)
+      q.push(cmd)
       return true
     }
     return false
@@ -109,6 +225,9 @@ export default class Machine {
   }
   tick () {
     this.cp0 = this.cps
+    for (let s of this.sockets) {
+      s.tick()
+    }
   }
   execute () {
     let allRes = []
@@ -122,25 +241,26 @@ export default class Machine {
   }
   _continue (allRes) {
     let ex = this.execution
+    let cmd = ex.cmd
     ex.runFor = this.cp0
     try {
-      let { res, used } = lang.run(null, ex)
-      this.cp0 -= used
+      let res = lang.run(null, ex)
+      this.cp0 -= res.used
       if (res.paused) {
         this.execution = res
       } else {
         this.execution = null
         allRes.push({
           typ: 'res',
-          cmd: cmd,
-          val: res
+          id: cmd.id,
+          val: res.res
         })
       }
     } catch (e) {
       this.execution = null
       allRes.push({
         typ: 'error',
-        cmd: cmd,
+        id: cmd.id,
         val: 'crash: ' + e
       })
     }
@@ -148,68 +268,34 @@ export default class Machine {
   _runQueue (allRes) {
     let q = this.memory.get(Q)
     loop: for (; this.cp0 > 0 && q.length > 0; this.cp0--) {
-      let line = q.shift()
-      let [cmd, args] = split(line)
-      let prog = this.memory.get(cmd)
-      while (prog && prog.isProgram && prog.alias) {
-        [cmd, args] = split(prog.alias)
-        prog = this.memory.get(cmd)
-      }
-      if (!prog || !prog.isProgram) {
-        allRes.push({
-          typ: 'error',
-          cmd: cmd,
-          val: 'not found'
-        })
-      } else if (prog.f) {
-        let res = prog.f(this, args)
-        this.cp0 -= 5
-        if (!res) {
-          res = {
-            typ: 'res',
-            cmd: cmd
+      let cmd = q.shift()
+      let app = cmd.app
+      try {
+        let res = lang.run(app, { m: this.memory, extraOps: this.hardWords, runFor: this.cp0, loadWord: (name) => {
+          let word = this.memory.get(name)
+          if (word && word.isWord) {
+            return word
           }
-        }
-        if (!res.typ) {
-          res = {
-            typ: 'res',
-            cmd: cmd,
-            val: res
-          }
-        }
-        allRes.push(res)
-      } else if (prog.c) {
-        allRes.push({
-          typ: 'res',
-          cmd: cmd,
-          val: prog.c
-        })
-      } else if (prog.app) {
-        this.memory.set('argv', args)
-        try {
-          let { res, used } = lang.run(prog.app, { m: this.memory, ops: this.ops, runFor: this.cp0 })
-          this.cp0 -= used
-          if (res.paused) {
-            this.execution = res
-          } else {
-            allRes.push({
-              typ: 'res',
-              cmd: cmd,
-              val: res
-            })
-          }
-        } catch (e) {
+          return null
+        } })
+        this.cp0 -= res.used
+        if (res.paused) {
+          res.cmd = cmd
+          this.execution = res
+        } else {
           allRes.push({
-            typ: 'error',
-            cmd: cmd,
-            val: 'crash: ' + e
+            typ: 'res',
+            id: cmd.id,
+            val: res.res
           })
         }
-      } else {
+      } catch (e) {
+        console.log(e)
         allRes.push({
           typ: 'error',
-          cmd: cmd,
-          val: 'can\'t do'
+          id: cmd.id,
+          src: cmd.src,
+          val: 'crash: ' + e
         })
       }
     }

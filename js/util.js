@@ -34,3 +34,19 @@ export function distance (p1, p2) {
   let dy = p1.y - p2.y
   return Math.sqrt(dx*dx + dy*dy)
 }
+
+export function popN(s, n) {
+  let out = []
+  for (let i = 0; i < n; i++) {
+    out.push(s.pop())
+  }
+  return out.reverse()
+}
+
+export function popArgs(s, names) {
+  let out = {}
+  for (let n of names.reverse()) {
+    out[n] = s.pop()
+  }
+  return out
+}
