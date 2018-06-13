@@ -120,17 +120,21 @@ export default class Machine {
       try {
         app = lang.parse(src)
       } catch (e) {
-        return {
-          typ: 'error',
-          val: 'can\'t compile: ' + e
-        }
+        s.push('compile error: ' + e)
+        return
       }
       this.installWord(name, { app, src })
       s.push('ok')
     })
     this.addHardWord('queue', (m, s) => {
-      let src = s.pop()
-      this.enqueue({ src })
+      let cmd = { src: s.pop() }
+      try {
+        cmd.app = lang.parse(cmd.src)
+      } catch (e) {
+        s.push('compile error: ' + e)
+        return
+      }
+      this.enqueue(cmd)
     })
     this.addHardWord('list-words', (m, s) => {
       let l = this.listOps().concat(this.listHardWords()).concat(this.listWords())
