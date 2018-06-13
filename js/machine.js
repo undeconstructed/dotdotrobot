@@ -4,7 +4,9 @@ import * as lang from './lang.js'
 
 const Q = Symbol('q')
 
-// Memory looks after the memory in a Machine
+/**
+ * Memory looks after the memory in a Machine.
+ */
 class Memory {
   constructor() {
     this.m = new Map()
@@ -26,7 +28,9 @@ class Memory {
   }
 }
 
-// Socket allows fairly direct remote access into a Machine
+/**
+ * Socket allows fairly direct remote access into a Machine.
+ */
 class Socket {
   constructor (machine) {
     this.machine = machine
@@ -95,7 +99,9 @@ class Socket {
   }
 }
 
-// Machine is sort of a computer
+/**
+ * Machine is sort of a computer
+ */
 export default class Machine {
   constructor (cps, maxPrograms, queueSize, memorySize) {
     this.cps = cps

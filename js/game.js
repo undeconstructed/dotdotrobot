@@ -4,7 +4,11 @@ import * as random from './random.js'
 import Machine from './machine.js'
 import * as lang from './lang.js'
 
-class Thing {
+/**
+ * DotObject is all the things in the game that have some sort of life of their
+ * own.
+ */
+class DotObject {
   constructor (opts) {
     opts = opts || {}
     this.parent = opts.parent || null
@@ -27,14 +31,13 @@ class Thing {
     return p
   }
   get piece () {
-    let p = this.parent
-    while (p != null) {
-      if (p instanceof Piece) {
-        return p
-      }
-      p = p.parent
+    let o = this
+    let p = o.parent
+    while (!(p instanceof Area)) {
+      o = p
+      p = o.parent
     }
-    return p
+    return o
   }
   tick () {
   }
@@ -42,12 +45,116 @@ class Thing {
     assert(false, 'tried to get a thing to accept something')
     return false
   }
+  move (newParent, opts) {
+    return this.parent.pass(this, newParent, opts)
+  }
   toString () {
     return 'thing'
   }
 }
 
-class Programmable extends Thing {
+/**
+ * Area can contain objects, and lay them out in some sort of geography.
+ */
+class Area extends DotObject {
+  constructor (w, h) {
+    super()
+    this.w = w
+    this.h = h
+    this.children = new Set()
+  }
+  place (parent, x, y) {
+    return parent.accept(this, { x: x, y: y })
+  }
+  tick () {
+    for (let child of this.children) {
+      child.tick()
+    }
+    for (let child of this.children) {
+      if (child.motion) {
+        let m = child.motion
+        let nx = child.position.x + m.x
+        let ny =  child.position.y + m.y
+        if (nx < 0) nx = 0
+        if (ny < 0) ny = 0
+        if (nx > this.w) nx = this.w
+        if (ny > this.h) ny = this.h
+        child.position.x = nx
+        child.position.y = ny
+        // motion stops immediately for now
+        child.motion = { x: 0, y: 0 }
+      }
+    }
+  }
+  accept (child, opts) {
+    assert(child instanceof DotObject)
+    this.children.add(child)
+    child.parent = this
+    child.position = {
+      x: opts.x || 0,
+      y: opts.y || 0
+    }
+    return true
+  }
+  remove (child) {
+    return this.children.delete(child)
+  }
+  pass (child, newParent, opts) {
+    if (this.children.has(child)) {
+      if (newParent.accept(child, opts)) {
+        this.children.delete(child)
+        return true
+      }
+    }
+    return false
+  }
+  visibleTo (child) {
+    let out = []
+    for (let e of this.children) {
+      if (e === child) {
+        continue
+      }
+      let dist = distance(child.position, e.position)
+      if (dist < 50) {
+        out.push({
+          x: child.position.x - e.position.x,
+          y: child.position.y - e.position.y,
+          e: e
+        })
+      }
+    }
+    return out
+  }
+  toString () {
+    if (this.children.size > 0) {
+      return 'area with [' + join(this.children, ',') + ']'
+    } else {
+      return 'area'
+    }
+  }
+}
+
+/**
+ * World is the containers of all things.
+ */
+class World extends Area {
+  constructor (run, w, h) {
+    super(w, h)
+    this.run = run
+  }
+  move () {
+    assert(false, 'tried to move world')
+    return false
+  }
+  toString () {
+    return 'world ' + super.toString()
+  }
+}
+
+/**
+ * Programmables have a Machine in them.
+ */
+class Programmable extends DotObject {
   constructor (opts) {
     super(opts)
     // this thing is the actual computer
@@ -87,31 +194,10 @@ class Programmable extends Thing {
   }
 }
 
-class Component extends Programmable {
-  constructor () {
-    super()
-    this.socket0 = this.machine.newSocket()
-    this.addHardWord('return', (m, s) => {
-      let [name, val] = [s.pop(), s.pop()]
-      this.socket0.push([ 'output', name, val ])
-    })
-  }
-  get socket () {
-    return this.socket0
-  }
-  tick () {
-    super.tick()
-    for (let r of this.results()) {
-      if (r.id) {
-        this.socket0.push([ 'res', r ])
-      }
-    }
-  }
-  toString () {
-    return 'component'
-  }
-}
-
+/**
+ * Composites can have other programmable things (Components) inserted
+ * into them.
+ */
 class Composite extends Programmable {
   constructor (opts) {
     super(opts)
@@ -218,113 +304,57 @@ class Composite extends Programmable {
   }
 }
 
-class Piece extends Composite {
-  constructor (opts) {
-    super(opts)
-  }
-  move (newParent, opts) {
-    return this.parent.pass(this, newParent, opts)
-  }
-  toString () {
-    return 'piece ' + super.toString()
-  }
-}
-
-class Area extends Thing {
-  constructor (w, h) {
+/**
+ * Components have sockets so they can be inserted into a Composite thing.
+ */
+class Component extends Programmable {
+  constructor () {
     super()
-    this.w = w
-    this.h = h
-    this.children = new Set()
+    this.socket0 = this.machine.newSocket()
+    this.addHardWord('return', (m, s) => {
+      let [name, val] = [s.pop(), s.pop()]
+      this.socket0.push([ 'output', name, val ])
+    })
   }
-  place (parent, x, y) {
-    return parent.accept(this, { x: x, y: y })
+  get socket () {
+    return this.socket0
   }
   tick () {
-    for (let child of this.children) {
-      child.tick()
-    }
-    for (let child of this.children) {
-      if (child.motion) {
-        let m = child.motion
-        let nx = child.position.x + m.x
-        let ny =  child.position.y + m.y
-        if (nx < 0) nx = 0
-        if (ny < 0) ny = 0
-        if (nx > this.w) nx = this.w
-        if (ny > this.h) ny = this.h
-        child.position.x = nx
-        child.position.y = ny
-        // motion stops immediately for now
-        child.motion = { x: 0, y: 0 }
+    super.tick()
+    for (let r of this.results()) {
+      if (r.id) {
+        this.socket0.push([ 'res', r ])
       }
     }
-  }
-  accept (child, opts) {
-    assert(child instanceof Thing)
-    this.children.add(child)
-    child.parent = this
-    child.position = {
-      x: opts.x || 0,
-      y: opts.y || 0
-    }
-    return true
-  }
-  remove (child) {
-    return this.children.delete(child)
-  }
-  pass (child, newParent, opts) {
-    if (this.children.has(child)) {
-      if (newParent.accept(child, opts)) {
-        this.children.delete(child)
-        return true
-      }
-    }
-    return false
-  }
-  visibleTo (child) {
-    let out = []
-    for (let e of this.children) {
-      if (e === child) {
-        continue
-      }
-      let dist = distance(child.position, e.position)
-      if (dist < 50) {
-        out.push({
-          x: child.position.x - e.position.x,
-          y: child.position.y - e.position.y,
-          e: e
-        })
-      }
-    }
-    return out
   }
   toString () {
-    if (this.children.size > 0) {
-      return 'area with [' + join(this.children, ',') + ']'
-    } else {
-      return 'area'
-    }
+    return 'component'
   }
 }
 
-class World extends Area {
-  constructor (run, w, h) {
-    super(w, h)
-    this.run = run
-  }
-  move () {
-    assert(false, 'tried to move world')
-    return false
-  }
-  toString () {
-    return 'world ' + super.toString()
-  }
+/**
+ * SimpleComposites can have lightweight components inserted, which are
+ * directly controlled from the owners Machine.
+ */
+class SimpleComposite extends Programmable {
 }
 
+/**
+ * SimpleComponents are tightly coupled with their parent, and do not have their
+ * own Machines.
+ */
+class SimpleComponent {
+}
+
+/**
+ * ArmCore1 is the functionality of an arm, for use in components etc.
+ */
 class ArmCore1 {
 }
 
+/**
+ * Arm1 is a basic arm as a Component.
+ */
 class Arm1 extends Component {
   constructor () {
     super()
@@ -448,6 +478,9 @@ class Arm1 extends Component {
   }
 }
 
+/**
+ * ScannerCore1 is functionality of a scanner, for use in components etc.
+ */
 class ScannerCore1 {
   scan (host) {
     let near = host.area.visibleTo(host.piece)
@@ -461,6 +494,9 @@ class ScannerCore1 {
   }
 }
 
+/**
+ * Scanner1 is a basic scanner as a Component.
+ */
 class Scanner1 extends Component {
   constructor () {
     super()
@@ -491,7 +527,10 @@ class Scanner1 extends Component {
   }
 }
 
-class Player extends Piece {
+/**
+ * Player is an object that has a special link to the game's control system.
+ */
+class Player extends Composite {
   constructor () {
     super({ colour: 'pink', size: 'medium' })
     // default extension points
@@ -596,7 +635,11 @@ class Player extends Piece {
   }
 }
 
-class Robot1 extends Piece {
+/**
+ * Robot1 is a basic robot. It has a Socket to control it, if you can plug into
+ * it.
+ */
+class Robot1 extends Programmable {
   constructor (name, colour) {
     super({ colour })
     // internal state
@@ -640,6 +683,9 @@ class Robot1 extends Piece {
   }
 }
 
+/**
+ * Run is an episode of the game.
+ */
 class Run {
   constructor () {
     this.n = 0
@@ -672,6 +718,9 @@ class Run {
   }
 }
 
+/**
+ * Game is everything someone has done or is doing.
+ */
 export default class Game {
   constructor () {
     this.run = new Run()
