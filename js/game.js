@@ -102,7 +102,9 @@ class Component extends Programmable {
   tick () {
     super.tick()
     for (let r of this.results()) {
-      this.socket0.push([ 'res', r ])
+      if (r.id) {
+        this.socket0.push([ 'res', r ])
+      }
     }
   }
   toString () {
@@ -503,12 +505,16 @@ class Player extends Piece {
     this.accept(new Scanner1(), { slot: 'eye' })
     this.addHardWord('state', (m, s) => {
       s.push({
-        typ: 'state',
-        val: {
-          position: this.position,
-          power: [100, 100],
-          wear: [10, 100]
-        }
+        position: this.position,
+        power: [100, 100],
+        wear: [10, 100]
+      })
+    })
+    this.addHardWord('return', (m, s) => {
+      let args = popArgs(s, [ 'data', 'name' ])
+      this.events.push({
+        typ: args.name,
+        val: args.data
       })
     })
     // XXX - only exists because can't write this as app
@@ -523,7 +529,7 @@ class Player extends Piece {
               events.push(r)
             }
           } else if (r.typ === 'debug') {
-            console.log('debug', r)
+            // console.log('debug', r)
           } else {
             events.push(r)
           }
@@ -539,6 +545,7 @@ class Player extends Piece {
     this.compileWord('grab', '"grab" "arm-1" tell ;')
     this.compileWord('set-idle', '"idle" compile ;')
     this.compileWord('compose', 'compose0 ;')
+    this.compileWord('get-state', 'state "state" return "ok" ;')
   }
   startTick (commands) {
     this.events = []

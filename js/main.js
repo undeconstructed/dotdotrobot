@@ -49,7 +49,7 @@ class State extends Cell {
     this.box.appendChild(this.area)
   }
   update (data) {
-    this.area.textContent = JSON.stringify(data, mapper)
+    this.area.textContent = JSON.stringify(data, mapper, '  ')
   }
 }
 
@@ -72,9 +72,23 @@ class Map extends Cell {
     let ctx = this.canvas.getContext('2d')
     // ctx.globalCompositeOperation = 'destination-over'
     ctx.clearRect(0, 0, this.w, this.h)
+    this.drawScanRange(ctx)
+    // ctx.globalCompositeOperation = 'source-out'
     this.drawGrid(ctx)
+    this.drawSelf(ctx)
     this.drawData(ctx)
     window.requestAnimationFrame(() => this.draw())
+  }
+  drawScanRange (ctx) {
+    // ctx.save()
+    ctx.fillStyle = 'white'
+    // ctx.strokeStyle = 'rgb(0,0,0)'
+    ctx.beginPath()
+    ctx.arc(this.w / 2, this.h / 2, 200, 0, Math.PI * 2, true)
+    // ctx.clip()
+    // ctx.stroke()
+    ctx.fill()
+    // ctx.restore()
   }
   drawGrid (ctx) {
     let gap = 50
@@ -86,7 +100,6 @@ class Map extends Cell {
     for (let x = gap; x < this.w; x += gap) {
       this.drawLine(ctx, x, 0, x, this.w)
     }
-    this.drawSelf(ctx)
   }
   drawLine (ctx, x1, y1, x2, y2) {
     ctx.save()
@@ -99,16 +112,16 @@ class Map extends Cell {
     ctx.restore()
   }
   drawData (ctx) {
+    ctx.save()
     for (let e of this.data) {
-      ctx.save()
       ctx.fillStyle = e.colour
       ctx.strokeStyle = 'rgb(0,0,0)'
       ctx.beginPath()
       ctx.arc((this.w / 2 + e.x * this.scale), (this.h / 2 + e.y * this.scale), this.pulse * 10, 0, Math.PI * 2, true)
       ctx.fill()
       ctx.stroke()
-      ctx.restore()
     }
+    ctx.restore()
   }
   drawSelf (ctx) {
     ctx.save()
@@ -152,6 +165,10 @@ class Input extends Cell {
     historyBox.classList.add('history')
     this.history = new Console(historyBox, e => `[${e.id}][${timeF(e.time)}] ${e.src}`, e => { this.issue(e.src) })
     this.element.appendChild(historyBox)
+    let buttonBox = document.createElement('div')
+    buttonBox.classList.add('box')
+    this.buttons = new Buttons(this, buttonBox)
+    this.element.appendChild(buttonBox)
     let inputBox = document.createElement('div')
     inputBox.innerHTML = '<form><input type="text" placeholder="$ ..."></form>'
     this.element.appendChild(inputBox)
@@ -205,12 +222,6 @@ class Buttons {
     this.box = box
     this.box.classList.add('buttons')
     this.add('look')
-    this.add('look+', 'tell eye scan')
-    this.add('grab')
-    this.add('slots', 'list-slots')
-    this.add('parts', 'list-parts')
-    this.add('grab')
-    this.add('DEBUG describe', 'describe')
   }
   add (tag, cmd) {
     if (!cmd) {
