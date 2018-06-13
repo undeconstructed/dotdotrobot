@@ -309,6 +309,13 @@ function run (p, opts) {
         frame = { a: frame.a, f: sub, n: 0, parent: frame, times: times }
       }
     } else if (c.t === WORD) {
+      if (c.v === 'call') {
+        let oc = c
+        c = {
+          t: WORD,
+          v: s.pop()
+        }
+      }
       let op = ops[c.v]
       if (op) {
         op(m, s)
