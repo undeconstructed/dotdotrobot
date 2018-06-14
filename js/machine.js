@@ -271,7 +271,9 @@ export default class Machine {
       allRes.push({
         typ: 'error',
         id: cmd.id,
-        val: 'crash: ' + e
+        src: cmd.src,
+        e: e,
+        val: 'CRASH ' + e.message
       })
     }
   }
@@ -300,12 +302,12 @@ export default class Machine {
           })
         }
       } catch (e) {
-        console.log(e)
         allRes.push({
           typ: 'error',
           id: cmd.id,
           src: cmd.src,
-          val: 'crash: ' + e
+          e: e,
+          val: 'CRASH ' + e.message
         })
       }
     }

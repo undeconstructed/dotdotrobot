@@ -36,6 +36,9 @@ export function distance (p1, p2) {
 }
 
 export function popN(s, n) {
+  if (s.length < n) {
+    throw new Error('UNDERFLOW')
+  }
   let out = []
   for (let i = 0; i < n; i++) {
     out.push(s.pop())
@@ -44,6 +47,9 @@ export function popN(s, n) {
 }
 
 export function popArgs(s, names) {
+  if (s.length < names.length) {
+    throw new Error('UNDERFLOW')
+  }
   let out = {}
   for (let n of names.reverse()) {
     out[n] = s.pop()

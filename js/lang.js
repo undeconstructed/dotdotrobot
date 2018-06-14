@@ -1,7 +1,7 @@
 
 // docker run -it --rm -v $PWD:/js node /usr/local/bin/node /js/lang.js
 
-import { split } from './util.js'
+import { split, popN } from './util.js'
 
 const STRING = Symbol('string')
 const LSTRING = Symbol('lstring')
@@ -160,109 +160,111 @@ function parse (s) {
   }
 
   if (i) {
-    throw new Error('unclosed')
+    throw new Error('UNCLOSED')
   }
 
   if (frame.parent) {
-    throw new Error('unbalanced')
+    throw new Error('UNBALANCED')
   }
 
   return apps
 }
 
 export const ops = {
+  'i': (m, s) => {},
   '+': (m, s) => {
-    let [a, b] = [s.pop(), s.pop()]
+    let [a, b] = popN(s, 2)
     s.push(a + b)
   },
   '-': (m, s) => {
-    let [b, a] = [s.pop(), s.pop()]
+    let [a, b] = popN(s, 2)
     s.push(a - b)
   },
   '*': (m, s) => {
-    let [a, b] = [s.pop(), s.pop()]
+    let [a, b] = popN(s, 2)
     s.push(a * b)
   },
   '/': (m, s) => {
-    let [b, a] = [s.pop(), s.pop()]
+    let [a, b] = popN(s, 2)
     s.push(a / b)
   },
   '=': (m, s) => {
-    let [b, a] = [s.pop(), s.pop()]
+    let [a, b] = popN(s, 2)
     s.push(a == b)
   },
   '>': (m, s) => {
-    let [b, a] = [s.pop(), s.pop()]
+    let [a, b] = popN(s, 2)
     s.push(a > b)
   },
   '>=': (m, s) => {
-    let [b, a] = [s.pop(), s.pop()]
+    let [a, b] = popN(s, 2)
     s.push(a >= b)
   },
   '<': (m, s) => {
-    let [b, a] = [s.pop(), s.pop()]
+    let [a, b] = popN(s, 2)
     s.push(a < b)
   },
   '<=': (m, s) => {
-    let [b, a] = [s.pop(), s.pop()]
+    let [a, b] = popN(s, 2)
     s.push(a <= b)
   },
   '!=': (m, s) => {
-    let [b, a] = [s.pop(), s.pop()]
+    let [a, b] = popN(s, 2)
     s.push(a != b)
   },
   'drop': (m, s) => {
-    s.pop()
+    popN(s, 1)
   },
   'dup': (m, s) => {
-    let v = s.pop()
+    let v = popN(s, 1)
     s.push(v)
     s.push(v)
   },
   'over': (m, s) => {
-    let [a, b] = [s.pop(), s.pop()]
+    let [a, b] = popN(s, 2)
     s.push(b)
     s.push(a)
     s.push(b)
   },
   'invert': (m, s) => {
-    let v = s.pop()
+    let [v] = popN(s, 1)
     s.push(!!v)
   },
   'swap': (m, s) => {
-    let [a, b] = [s.pop(), s.pop()]
-    s.push(a)
+    let [a, b] = popN(s, 2)
     s.push(b)
+    s.push(a)
   },
   'clear': (m, s) => {
     s.length = 0
   },
   'print': (m, s) => {
-    let v = s.pop()
+    let [v] = popN(s, 1)
     console.log(v)
     s.push(v)
   },
   'rand': (m, s) => {
-    let [max, min] = [s.pop(), s.pop()]
+    let [min, max] = popN(s, 2)
     let r = Math.floor(Math.random() * (max - min + 1)) + min
     s.push(r)
   },
   'split': (m, s) => {
-    let arg = s.pop()
-    let args = s.split()
+    let [v] = popN(s, 1)
+    let args = v.split()
     for (let a of args) {
       s.push(a)
     }
     s.push(s.length)
   },
   'join': (m, s) => {
-    let arg = s.pop()
-    let string = arg.join(',')
+    let [v] = popN(s, 1)
+    let string = v.join(',')
     s.push(string)
   },
-  'tojson': (m, s) => {
-    let j = JSON.stringify(s.pop())
-    s.push(j)
+  'to-json': (m, s) => {
+    let [v] = popN(s, 1)
+    let json = JSON.stringify(v)
+    s.push(json)
   }
 }
 
@@ -334,8 +336,7 @@ function run (p, opts) {
               // console.log('enter ext', c.v)
               frame = { a: ext.app, f: ext.app['main'], n: 0, parent: frame }
             } else {
-              s.push('NOWORD ' + c.v)
-              break
+              throw new Error('NOWORD ' + c.v)
             }
           }
         }
