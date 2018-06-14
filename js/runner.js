@@ -2,7 +2,8 @@
 import Game from './game.js'
 
 // all globals here to keep them out of the exported object
-let game = new Game()
+let hz = 1
+let game = new Game(hz)
 let commands = []
 let events = []
 let timeout = null
@@ -15,7 +16,7 @@ let tick = function() {
   if (newEvents.length > 0) {
     events = events.concat(newEvents)
   }
-  timeout = window.setTimeout(tick, 1000)
+  timeout = window.setTimeout(tick, 1000 / hz)
 }
 
 class Runner {
@@ -23,11 +24,11 @@ class Runner {
     commands.push(command)
   }
   read () {
-    let oldEvents = events
+    let events0 = events
     events = []
     return {
       n: game.run.n,
-      events: oldEvents
+      events: events0
     }
   }
   pause () {
@@ -35,7 +36,7 @@ class Runner {
     if (paused) {
       window.clearTimeout(timeout)
     } else {
-      timeout = window.setTimeout(tick, 1000)
+      timeout = window.setTimeout(tick, 1000 / hz)
     }
     console.log((paused ? '' : 'un') + 'paused')
     return paused
@@ -44,6 +45,6 @@ class Runner {
 
 let runner = new Runner()
 
-tick()
+window.setTimeout(tick, 0)
 
 export default runner

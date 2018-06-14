@@ -298,19 +298,17 @@ window.addEventListener('keypress', e => {
 let tick = function() {
   let s = runner.read()
   debugUI.update(s)
-  if (s.events.length > 0) {
-    for (let e of s.events) {
-      switch (e.typ) {
-      case 'seen':
-        // state.update(e.val)
-        map.updateSeen(JSON.parse(e.val))
-        break
-      case 'state':
-        state.update(e.val)
-        break
-      default:
-        events.add(e)
-      }
+  for (let e of s.events) {
+    // console.log(e)
+    switch (e.typ) {
+    case 'seen':
+      map.updateSeen(JSON.parse(e.val))
+      break
+    case 'state':
+      state.update(e.val)
+      break
+    default:
+      events.add(e)
     }
   }
   window.requestAnimationFrame(tick)

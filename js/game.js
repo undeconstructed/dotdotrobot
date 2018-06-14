@@ -5,11 +5,27 @@ import Machine from './machine.js'
 import * as lang from './lang.js'
 
 /**
+ * DotLive is all the things in the game that have some sort of life.
+ */
+class DotLive {
+  constructor (run) {
+    assert(run instanceof Run)
+    this.run = run
+  }
+  get hz() {
+    return this.run.hz
+  }
+  tick () {
+  }
+}
+
+/**
  * DotObject is all the things in the game that have some sort of life of their
  * own.
  */
-class DotObject {
-  constructor (opts) {
+class DotObject extends DotLive {
+  constructor (run, opts) {
+    super(run)
     opts = opts || {}
     this.parent = opts.parent || null
     this.size = opts.size || 'small'
@@ -57,8 +73,8 @@ class DotObject {
  * Area can contain objects, and lay them out in some sort of geography.
  */
 class Area extends DotObject {
-  constructor (w, h) {
-    super()
+  constructor (run, w, h) {
+    super(run)
     this.w = w
     this.h = h
     this.children = new Set()
@@ -139,8 +155,7 @@ class Area extends DotObject {
  */
 class World extends Area {
   constructor (run, w, h) {
-    super(w, h)
-    this.run = run
+    super(run, w, h)
   }
   move () {
     assert(false, 'tried to move world')
@@ -155,10 +170,10 @@ class World extends Area {
  * Programmables have a Machine in them.
  */
 class Programmable extends DotObject {
-  constructor (opts) {
-    super(opts)
+  constructor (run, opts) {
+    super(run, opts)
     // this thing is the actual computer
-    this.machine = new Machine(50, 20, 10, 10)
+    this.machine = new Machine(100 / this.hz, 20, 10, 10)
     // results of execution
     this._results = []
     // universally installed programs
@@ -185,6 +200,12 @@ class Programmable extends DotObject {
   }
   execute () {
     let res = this.machine.execute()
+    for (let r of res) {
+      if (r.e) {
+        console.log(r.e)
+        delete r.e
+      }
+    }
     this._results = this._results.concat(res)
   }
   results () {
@@ -195,12 +216,12 @@ class Programmable extends DotObject {
 }
 
 /**
- * Composites can have other programmable things (Components) inserted
+ * SocketComposite can have other programmable things (Components) inserted
  * into them.
  */
-class Composite extends Programmable {
-  constructor (opts) {
-    super(opts)
+class SocketComposite extends Programmable {
+  constructor (run, opts) {
+    super(run, opts)
     this.slots = new Set()
     this.parts = new Map()
     // where composed result is after tick
@@ -305,11 +326,11 @@ class Composite extends Programmable {
 }
 
 /**
- * Components have sockets so they can be inserted into a Composite thing.
+ * SocketComponents have sockets so they can be inserted into a SocketComposite thing.
  */
-class Component extends Programmable {
-  constructor () {
-    super()
+class SocketComponent extends Programmable {
+  constructor (run) {
+    super(run)
     this.socket0 = this.machine.newSocket()
     this.addHardWord('return', (m, s) => {
       let [name, val] = [s.pop(), s.pop()]
@@ -337,27 +358,179 @@ class Component extends Programmable {
  * directly controlled from the owners Machine.
  */
 class SimpleComposite extends Programmable {
+  constructor(run, opts) {
+    super(run, opts)
+    this.slots = new Set()
+    this.parts = new Map()
+  }
+  addSlot (name) {
+    this.slots.add(name)
+  }
+  install (slot, component) {
+    assert(component instanceof SimpleComponent)
+    if (!this.slots.has(slot) || this.parts.get(slot)) {
+      return false
+    }
+    this.parts.set(slot, component)
+    component.linkUp(this, slot)
+    let ops = component.ops
+    for (let k of Object.keys(ops)) {
+      this.machine.addHardWord(slot + '-' + k, ops[k])
+    }
+    return true
+  }
+  uninstall (slot) {
+    // TODO
+  }
+  tick () {
+    super.tick()
+    for (let part of this.parts.values()) {
+      part.tick()
+    }
+  }
+  accept (piece) {
+    for (let part of this.parts.values()) {
+      if (part.accept(piece)) {
+        return true
+      }
+    }
+    return false
+  }
+  pass (piece, newParent, opts) {
+    for (let part of this.parts.values()) {
+      if (part.pass(piece, newParent, opts)) {
+        return true
+      }
+    }
+    return false
+  }
 }
 
 /**
  * SimpleComponents are tightly coupled with their parent, and do not have their
  * own Machines.
  */
-class SimpleComponent {
+class SimpleComponent extends DotLive {
+  constructor (run, opts) {
+    super(run)
+    this.owner = null
+    this.ops = opts.ops || {}
+  }
+  linkUp (owner, id) {
+    assert(owner instanceof SimpleComposite)
+    this.owner = owner
+    this.id = id
+  }
+  accept (piece) {
+    return false
+  }
+  pass (piece, newParent, opts) {
+    return false
+  }
+  toString () {
+    return 'simple component'
+  }
 }
 
 /**
- * ArmCore1 is the functionality of an arm, for use in components etc.
+ * ScannerCore is functionality of a scanner, for use in components etc.
  */
-class ArmCore1 {
+class ScannerCore {
+  scan (host) {
+    let near = host.area.visibleTo(host.piece)
+    let o = near.map(e => ({
+      x: e.x,
+      y: e.y,
+      size: e.e.size,
+      colour: e.e.colour
+    }))
+    return o
+  }
 }
 
 /**
- * Arm1 is a basic arm as a Component.
+ * ScannerSocketComponent is a basic scanner as a SocketComponent.
  */
-class Arm1 extends Component {
-  constructor () {
-    super()
+class ScannerSocketComponent extends SocketComponent {
+  constructor (run) {
+    super(run)
+    this.core = new ScannerCore()
+    this.scanning = 0
+    this.timeToScan = 1
+    this.addHardWord('scan', (m, s) => {
+      this.scanning = this.timeToScan
+      s.push('scanning')
+    })
+    this.compileWord('do-scan', 'scan ;')
+    this.compileWord('onscan', '"seen" load tojson "seen" return ;')
+  }
+  tick () {
+    if (this.scanning > 0) {
+      if ((--this.scanning) == 0) {
+        let o = this.core.scan(this)
+        this.machine.setVariable('seen', o)
+        if (this.machine.hasWord('onscan')) {
+          this.command({ src: 'onscan' })
+        }
+      }
+    }
+    super.tick()
+  }
+  toString () {
+    return 'scanner ' + super.toString()
+  }
+}
+
+/**
+ * ScannerSimpleComponent is a basic scanner as a SimpleComponent.
+ */
+class ScannerSimpleComponent extends SimpleComponent {
+  constructor(run) {
+    super(run, {
+      ops: {
+        'scan': (m, s) => {
+          if (this.scanning > 0) {
+            s.push('already scanning')
+            return
+          }
+          let args = popArgs(s, [ 'target', 'hook' ])
+          this.args = args
+          this.scanning = this.timeToScan
+          s.push('scanning')
+        }
+      }
+    })
+    this.core = new ScannerCore()
+    this.scanning = 0
+    this.timeToScan = 1 * this.hz
+  }
+  tick () {
+    if (this.scanning > 0) {
+      if ((--this.scanning) <= 0) {
+        this.scanning = 0
+        let o = this.core.scan(this.owner)
+        this.owner.machine.setVariable(this.args.target, o)
+        this.owner.command({ src: this.args.hook })
+      }
+    }
+  }
+  toString () {
+    return 'scanner ' + super.toString()
+  }
+}
+
+/**
+ * ArmCore is the functionality of an arm, for use in components etc.
+ */
+class ArmCore {
+}
+
+/**
+ * ArmSocketComponent is a basic arm as a SocketComponent.
+ */
+class ArmSocketComponent extends SocketComponent {
+  constructor (run) {
+    super(run)
     this.howLongToGrab = 3
     this.grabbing = 0
     this.holding = null
@@ -437,8 +610,7 @@ class Arm1 extends Component {
       if ((--this.grabbing) == 0) {
         let near = this.area.visibleTo(this.piece)
         for (let e of near) {
-          if (e.e instanceof Piece) {
-            e.e.move(this)
+          if (e.e.move(this)) {
             if (this.holding.socket) {
               this.holding.socket.plug(this)
             }
@@ -458,15 +630,14 @@ class Arm1 extends Component {
     }
     super.tick()
   }
-  accept (piece) {
-    assert(piece instanceof Piece)
-    this.holding = piece
-    piece.parent = this
+  accept (o) {
+    this.holding = o
+    o.parent = this
     return true
   }
-  pass (piece, newParent, opts) {
-    if (this.holding === piece) {
-      if (newParent.accept(piece, opts)) {
+  pass (o, newParent, opts) {
+    if (this.holding === o) {
+      if (newParent.accept(o, opts)) {
         this.holding = null
         return true
       }
@@ -479,69 +650,139 @@ class Arm1 extends Component {
 }
 
 /**
- * ScannerCore1 is functionality of a scanner, for use in components etc.
+ * ArmSimpleComponent is a basic arm as a SimpleComponent.
  */
-class ScannerCore1 {
-  scan (host) {
-    let near = host.area.visibleTo(host.piece)
-    let o = near.map(e => ({
-      x: e.x,
-      y: e.y,
-      size: e.e.size,
-      colour: e.e.colour
-    }))
-    return o
-  }
-}
-
-/**
- * Scanner1 is a basic scanner as a Component.
- */
-class Scanner1 extends Component {
-  constructor () {
-    super()
-    this.core = new ScannerCore1()
-    this.scanning = 0
-    this.timeToScan = 1
-    this.addHardWord('scan', (m, s) => {
-      this.scanning = this.timeToScan
-      s.push('scanning')
-    })
-    this.compileWord('do-scan', 'scan ;')
-    this.compileWord('onscan', '"seen" load tojson "seen" return ;')
-  }
-  tick () {
-    if (this.scanning > 0) {
-      if ((--this.scanning) == 0) {
-        let o = this.core.scan(this)
-        this.machine.setVariable('seen', o)
-        if (this.machine.hasWord('onscan')) {
-          this.command({ src: 'onscan' })
+class ArmSimpleComponent extends SimpleComponent {
+  constructor(run) {
+    super(run, {
+      ops: {
+        'grab': (m, s) => {
+          if (this.holding) {
+            s.push('already holding!')
+            return
+          }
+          if (this.grabbing > 0) {
+            s.push('already grabbing!')
+          }
+          let args = popArgs(s, [ 'hook' ])
+          this.args = args
+          this.grabbing = this.timeToGrab
+          s.push('grabbing...')
+        },
+        'release': (m, s) => {
+          if (this.holding) {
+            if (this.holding.socket) {
+              this.holding.socket.unplug()
+            }
+            this.holding.move(this.owner.area, this.holding.position)
+            s.push('ok')
+          } else {
+            s.push('not holding anything!')
+          }
+        },
+        'holding': (m, s) => {
+          if (this.holding) {
+            s.push(this.holding.toString())
+          } else {
+            s.push('nothing')
+          }
+        },
+        'tell': (m, s) => {
+          let [src] = popN(s, 1)
+          if (this.holding) {
+            let socket = this.holding.socket
+            if (socket) {
+              // XXX - is this right place to compile?
+              let app = lang.parse(src)
+              let cmd = [ 'queue', [ null, app ] ]
+              socket.send(cmd)
+              s.push('ok')
+              return
+            } else {
+              s.push('no socket')
+              return
+            }
+          }
+          s.push('not holding anything!')
+        },
+        'copy': (m, s) => {
+          let args = popArgs(s, ['data', 'name'])
+          if (this.holding) {
+            let socket = this.holding.socket
+            if (socket) {
+              let cmd = [ 'write', [ args.name, args.data ] ]
+              socket.send(cmd)
+              s.push('ok')
+              return
+            } else {
+              s.push('no socket')
+              return
+            }
+          }
+          s.push('not holding anything!')
         }
       }
+    })
+    this.core = new ArmCore()
+    this.grabbing = 0
+    this.timeToGrab = 5 * this.hz
+    this.holding = null
+  }
+  tick () {
+    if (this.grabbing > 0) {
+      if ((--this.grabbing) <= 0) {
+        this.grabbing = 0
+        let near = this.owner.area.visibleTo(this.owner.piece)
+        for (let e of near) {
+          if (e.e.move(this.owner)) {
+            if (this.holding.socket) {
+              this.holding.socket.plug(this)
+            }
+            break
+          }
+        }
+        this.owner.command({ src: this.args.hook })
+      }
     }
-    super.tick()
+    if (this.holding) {
+      this.holding.tick()
+      // stop the thing dead
+      this.holding.motion = null
+    }
+  }
+  accept (o) {
+    this.holding = o
+    o.parent = this.owner
+    return true
+  }
+  pass (o, newParent, opts) {
+    if (this.holding === o) {
+      if (newParent.accept(o, opts)) {
+        this.holding = null
+        return true
+      }
+    }
+    return false
   }
   toString () {
-    return 'scanner ' + super.toString()
+    return 'arm ' + super.toString()
   }
 }
 
 /**
- * Player is an object that has a special link to the game's control system.
+ * SocketPlayer uses the SocketComposite system.
  */
-class Player extends Composite {
-  constructor () {
-    super({ colour: 'pink', size: 'medium' })
+class SocketPlayer extends SocketComposite {
+  constructor (run, opts) {
+    super(run, opts)
     // default extension points
     this.addSlot('arm-1')
     this.addSlot('arm-2')
     this.addSlot('eye')
-    // events for sending back out of the game
-    this.events = []
     // some default components
-    this.accept(new Arm1(), { slot: 'arm-1' })
-    this.accept(new Scanner1(), { slot: 'eye' })
+    this.accept(new ArmSocketComponent(this.run), { slot: 'arm-1' })
+    this.accept(new ScannerSocketComponent(this.run), { slot: 'eye' })
+    // hardwords
     this.addHardWord('state', (m, s) => {
       s.push({
         position: this.position,
@@ -577,28 +818,10 @@ class Player extends Composite {
       }
       s.push('ok')
     })
-    // some default programs
-    this.compileWord('sample', '1 2 + ;')
-    this.compileWord('help', '"try typing list-programs" ;"')
+    // some default words
     this.compileWord('look', '"scan" "eye" tell ;')
     this.compileWord('grab', '"grab" "arm-1" tell ;')
-    this.compileWord('set-idle', '"idle" compile ;')
     this.compileWord('compose', 'compose0 ;')
-    this.compileWord('get-state', 'state "state" return "ok" ;')
-  }
-  startTick (commands) {
-    this.events = []
-    if (commands) {
-      for (let c of commands) {
-        if (!this.command(c)) {
-          this.events.push({
-            typ: 'error',
-            val: `command overflow`,
-            cmd: c.id
-          })
-        }
-      }
-    }
   }
   tick () {
     super.tick()
@@ -617,6 +840,82 @@ class Player extends Composite {
     if (this.machine.timeLeft > 0 && this.machine.hasWord('idle')) {
       this.command({ src: 'idle' })
       this.execute()
+    }
+  }
+}
+
+/**
+ * SimplePlayer uses the SimpleComposite system.
+ */
+class SimplePlayer extends SimpleComposite {
+  constructor (run, opts) {
+    super(run, opts)
+    // default extension points
+    this.addSlot('arm-1')
+    this.addSlot('arm-2')
+    this.addSlot('eye')
+    // events for sending back out of the game
+    this.events = []
+    // some default components
+    this.install('eye', new ScannerSimpleComponent(this.run))
+    this.install('arm-1', new ArmSimpleComponent(this.run))
+    // hardwords
+    this.addHardWord('state', (m, s) => {
+      s.push({
+        position: this.position,
+        power: [100, 100],
+        wear: [10, 100]
+      })
+    })
+    this.addHardWord('return', (m, s) => {
+      let args = popArgs(s, [ 'data', 'name' ])
+      this.events.push({
+        typ: args.name,
+        val: args.data
+      })
+    })
+    // some default words
+    this.compileWord('look', '"seen" "on-scan" eye-scan ;')
+    this.compileWord('on-scan', '"seen" load to-json "seen" return ;')
+    this.compileWord('grab', '"on-grab" arm-1-grab ;')
+    this.compileWord('on-grab', 'arm-1-holding "grabbed" return ;')
+    this.compileWord('release', 'arm-1-release ;')
+  }
+  tick () {
+    super.tick()
+    if (this.machine.timeLeft > 0 && this.machine.hasWord('idle')) {
+      this.command({ src: 'idle' })
+      this.execute()
+    }
+  }
+}
+
+/**
+ * Player is an object that has a special link to the game's control system.
+ */
+class Player extends SimplePlayer {
+  constructor (run) {
+    super(run, { colour: 'pink', size: 'medium' })
+    // events for sending back out of the game
+    this.events = []
+    // some default words
+    this.compileWord('sample', '1 2 + ;')
+    this.compileWord('help', '"try typing list-programs" ;"')
+    this.compileWord('get-state', 'state "state" return "ok" ;')
+    this.compileWord('set-idle', '"idle" compile ;')
+  }
+  startTick (commands) {
+    this.events = []
+    if (commands) {
+      for (let c of commands) {
+        if (!this.command(c)) {
+          this.events.push({
+            typ: 'error',
+            val: `command overflow`,
+            cmd: c.id
+          })
+        }
+      }
     }
   }
   endTick () {
@@ -640,15 +939,15 @@ class Player extends Composite {
  * it.
  */
 class Robot1 extends Programmable {
-  constructor (name, colour) {
-    super({ colour })
+  constructor (run, name, colour) {
+    super(run, { colour })
     // internal state
     this.socket0 = this.machine.newSocket()
     this.machine.setVariable('name', name)
     this.time = 0
     this.power = { x: 0, y: 0 }
     // hardwired components
-    this.scanner = new ScannerCore1()
+    this.scanner = new ScannerCore()
     // ops
     this.machine.addHardWord('power', (m, s) => {
       let [y, x] = [s.pop(), s.pop()]
@@ -687,10 +986,11 @@ class Robot1 extends Programmable {
  * Run is an episode of the game.
  */
 class Run {
-  constructor () {
+  constructor (hz) {
+    this.hz = hz
     this.n = 0
     this.world = new World(this, 100, 100)
-    this.player = new Player()
+    this.player = new Player(this)
     this.player.place(this.world, { x: 10, y: 20 })
     this.addRandomRobot({ x: 12, y: 16 })
     this.addRandomRobot({ x: 1, y: 1 })
@@ -698,7 +998,7 @@ class Run {
     this.addRandomRobot({ x: 80, y: 90 })
   }
   addRandomRobot (opts) {
-    new Robot1(random.name(), random.colour()).place(this.world, opts)
+    new Robot1(this, random.name(), random.colour()).place(this.world, opts)
   }
   accept () {
     return false
@@ -722,8 +1022,8 @@ class Run {
  * Game is everything someone has done or is doing.
  */
 export default class Game {
-  constructor () {
-    this.run = new Run()
+  constructor (hz) {
+    this.run = new Run(hz)
   }
   toString () {
     return 'game\n' + this.run

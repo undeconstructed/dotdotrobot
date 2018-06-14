@@ -105,6 +105,26 @@ same core, and so run in basically the same way.
 
 ## try me
 
+### with simple composites
+
+```
+# look around
+look
+# tell look to run all the time
+"look" set-idle
+# the program the robot will run
+`:r 0 4 rand 2 - ; r r power ;` "robrun" compile
+# catch a robot
+grab
+# copy the run program to the robot
+"robrun" load "idle" arm-1-copy
+# release the robot
+release
+# is it moving?
+```
+
+### with socket composites
+
 ```
 # compile a little test program
 `"testing" dup log` "test" compile
@@ -122,7 +142,7 @@ look
 # tell look to run all the time
 "look" "idle" compile
 # the program the robot will run
-`:r 0 4 rand 2 - ; r r power "ok" log ;` "robrun" compile
+`:r 0 4 rand 2 - ; r r power ;` "robrun" compile
 # program to copy from arm to robot
 `"robrun" load "idle" copy` "copy-robrun" compile
 # copy them to the arm

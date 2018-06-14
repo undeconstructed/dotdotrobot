@@ -11,13 +11,15 @@ const adjs = [
   'spiny',
   'greasy',
   'shiny',
-  'purple'
+  'slimy'
 ]
 
 const nouns = [
   'creeper',
   'snooper',
-  'browser'
+  'browser',
+  'agitator',
+  'frier'
 ]
 
 export function pick (a) {
