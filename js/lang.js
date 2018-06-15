@@ -57,7 +57,7 @@ function parse (s) {
       } else if (c === ':') {
         i = DEF
         n = ''
-      } else if (c >= '0' && c <= '9') {
+      } else if ((c >= '0' && c <= '9')) { // || c === '-') {
         i = NUMBER
         n = c
       } else if (c === '"') {
@@ -66,7 +66,7 @@ function parse (s) {
       } else if (c === '`') {
         i = LSTRING
         n = ''
-      } else if (c === ' ') {
+      } else if (c === ' ' || c === '\n') {
       } else {
         i = WORD
         n = c
@@ -212,11 +212,15 @@ export const ops = {
     let [a, b] = popN(s, 2)
     s.push(a != b)
   },
+  'and' : (m, s) => {
+    let [a, b] = popN(s, 2)
+    s.push(!!a && !!b)
+  },
   'drop': (m, s) => {
     popN(s, 1)
   },
   'dup': (m, s) => {
-    let v = popN(s, 1)
+    let [v] = popN(s, 1)
     s.push(v)
     s.push(v)
   },
@@ -228,7 +232,7 @@ export const ops = {
   },
   'invert': (m, s) => {
     let [v] = popN(s, 1)
-    s.push(!!v)
+    s.push(!v)
   },
   'swap': (m, s) => {
     let [a, b] = popN(s, 2)

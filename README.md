@@ -123,6 +123,24 @@ release
 # is it moving?
 ```
 
+```
+# another robot program
+`dup "count" store "n" store 1 "d" store ;` "robsetup" compile
+`
+:go "d" load 3 * dup log 0 power ;
+:flip "d" load 1 = dup if 0 1 - "d" store "count" load "n" store ; invert if 0 "d" store ; ;
+"n" load 1 - dup "n" store 0 = dup if "d" load 1 = if scan "seen" store ; flip ; invert if go ; ;`
+"robrun" compile
+# catch a robot
+grab
+# copy setup program
+"robsetup" load "setup" arm-1-copy
+# run setup program
+`5 setup` arm-1-tell
+# copy run program as idle and release
+"robrun" load "idle" arm-1-copy release
+```
+
 ### with socket composites
 
 ```

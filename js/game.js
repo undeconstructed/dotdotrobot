@@ -1,5 +1,5 @@
 
-import { assert, split, join, distance, popArgs } from './util.js'
+import { assert, split, join, distance, popN, popArgs } from './util.js'
 import * as random from './random.js'
 import Machine from './machine.js'
 import * as lang from './lang.js'
