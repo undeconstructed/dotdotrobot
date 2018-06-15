@@ -163,7 +163,7 @@ class Input extends Cell {
     let historyBox = document.createElement('div')
     historyBox.classList.add('box')
     historyBox.classList.add('history')
-    this.history = new Console(historyBox, e => `[${e.id}][${timeF(e.time)}] ${e.src}`, e => { this.issue(e.src) })
+    this.history = new Console(historyBox, e => `[${e.id}][${timeF(e.time)}] ${e.src}`, e => { this.reshow(e) })
     this.element.appendChild(historyBox)
     let buttonBox = document.createElement('div')
     buttonBox.classList.add('box')
@@ -174,6 +174,10 @@ class Input extends Cell {
     this.element.appendChild(inputBox)
     this.entry = new Entry(this, inputBox)
     this.n = 1
+  }
+  reshow (cmd) {
+    this.entry.fillin(cmd.src)
+    this.entry.focus()
   }
   issue (src) {
     let cmd = {
@@ -256,6 +260,9 @@ class Entry {
       e.stopPropagation()
       return true
     })
+  }
+  fillin (src) {
+    this.i.value = src
   }
   focus () {
     this.i.focus()
