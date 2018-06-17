@@ -57,18 +57,26 @@ class Map extends Cell {
   constructor () {
     super('map')
     this.data = []
-    this.w = 500
-    this.h = 500
+    this.w = 800
+    this.h = 800
     this.scale = 10
+    this.mouse = { x: 0, y: this.h / -2 }
     this.canvas = document.createElement('canvas')
     this.canvas.width = this.w
     this.canvas.height = this.h
     // this.canvas.style = 'height: 100%; width: 100%;'
     this.box.appendChild(this.canvas)
+    this.canvas.addEventListener('mousemove', e => {
+      let [sx, sy] = [this.box.scrollLeft, this.box.scrollTop]
+      let [cx, cy] = [e.x - this.canvas.offsetLeft + sx, e.y - this.canvas.offsetTop + sy]
+      this.mouse = { x: cx, y: cy }
+    })
     this.draw()
   }
-  draw () {
-    this.pulse = 0.5 + Math.abs(Math.sin(Date.now() / 500))
+  centre () {
+    this.canvas.scrollIntoView({ block: 'center', inline: 'center' })
+  }
+  draw (e) {
     let ctx = this.canvas.getContext('2d')
     // ctx.globalCompositeOperation = 'destination-over'
     ctx.clearRect(0, 0, this.w, this.h)
@@ -77,14 +85,15 @@ class Map extends Cell {
     this.drawGrid(ctx)
     this.drawSelf(ctx)
     this.drawData(ctx)
+    this.drawPointerLine(ctx)
     window.requestAnimationFrame(() => this.draw())
   }
   drawScanRange (ctx) {
     // ctx.save()
-    ctx.fillStyle = 'white'
+    ctx.fillStyle = 'rgb(255,255,255,0.5)'
     // ctx.strokeStyle = 'rgb(0,0,0)'
     ctx.beginPath()
-    ctx.arc(this.w / 2, this.h / 2, 200, 0, Math.PI * 2, true)
+    ctx.arc(this.w / 2, this.h / 2, 10 * this.scale, 0, Math.PI * 2, true)
     // ctx.clip()
     // ctx.stroke()
     ctx.fill()
@@ -113,31 +122,60 @@ class Map extends Cell {
   }
   drawData (ctx) {
     ctx.save()
-    for (let e of this.data) {
-      ctx.fillStyle = e.colour
-      ctx.strokeStyle = 'rgb(0,0,0)'
-      ctx.beginPath()
-      ctx.arc((this.w / 2 + e.x * this.scale), (this.h / 2 + e.y * this.scale), this.pulse * 10, 0, Math.PI * 2, true)
-      ctx.fill()
-      ctx.stroke()
+    let alpha = 1
+    let fade = 0.5
+    for (let set of this.data) {
+      ctx.fillStyle = `rgb(0,255,0,${alpha})`
+      // ctx.strokeStyle = `rgb(0,0,0,${alpha})`
+      for (let e of set) {
+        ctx.beginPath()
+        let dx = e.distance * Math.cos(e.direction)
+        let dy = e.distance * Math.sin(e.direction)
+        let x = this.w / 2 + dx * this.scale
+        let y = this.h / 2 + dy * this.scale
+        ctx.arc(x, y, 10, 0, Math.PI * 2, true)
+        ctx.fill()
+        // ctx.stroke()
+      }
+      alpha = alpha * fade
     }
     ctx.restore()
   }
   drawSelf (ctx) {
     ctx.save()
-    // ctx.fillStyle = 'white'
+    ctx.fillStyle = 'white'
     ctx.strokeStyle = 'rgb(0,0,0)'
     ctx.beginPath()
     ctx.arc(this.w / 2, this.h / 2, 10, 0, Math.PI * 2, true)
-    // ctx.fill()
+    ctx.fill()
+    // ctx.stroke()
+    ctx.restore()
+  }
+  drawPointerLine (ctx) {
+    ctx.save()
+    ctx.strokeStyle = 'rgba(0,0,0,1)'
+    ctx.beginPath()
+    let [cx, cy] = [this.w / 2, this.h / 2]
+    let [dx, dy] = [cx - this.mouse.x, cy - this.mouse.y]
+    let b = Math.atan2(dy, dx)
+    let length = Math.max(Math.abs(cx / Math.cos(b)), Math.abs(cy / Math.sin(b)))
+    let [ex, ey] = [length * Math.cos(b), length * Math.sin(b)]
+    ctx.moveTo(cx, cy)
+    ctx.lineTo(cx - ex, cy - ey)
     ctx.stroke()
+    ctx.fillStyle = 'rgba(0,0,0,1)'
+    let d = (Math.round(b / Math.PI * 180) + 180 + 90) % 360
+    ctx.fillText(`${d} degrees`, cx + 10, cy + 20)
     ctx.restore()
   }
   updateSelf (position) {
     this.self = position
   }
   updateSeen (data) {
-    this.data = data
+    this.data.unshift(data)
+    if (this.data.length > 10) {
+      this.data.pop()
+    }
   }
 }
 
@@ -189,6 +227,7 @@ class Input extends Cell {
   }
   memo (cmd) {
     cmd.time = new Date()
+    localStorage.setItem('lastCommand', JSON.stringify(cmd))
     this.history.add(cmd)
   }
   focus () {
@@ -295,6 +334,8 @@ grid.add(state, '2 / 2 / 2 / 2')
 grid.add(events, '3 / 2 / 3 / 2')
 grid.add(input, 'entry / 1 / entry / 3')
 
+map.centre()
+
 window.addEventListener('keypress', e => {
   if (e.key === ' ') {
     let paused = runner.pause()
@@ -302,10 +343,10 @@ window.addEventListener('keypress', e => {
   }
 })
 
-let tick = function() {
-  let s = runner.read()
-  debugUI.update(s)
-  for (let e of s.events) {
+let newEvents = []
+
+let process = function () {
+  for (let e of newEvents) {
     // console.log(e)
     switch (e.typ) {
     case 'seen':
@@ -318,9 +359,18 @@ let tick = function() {
       events.add(e)
     }
   }
-  window.requestAnimationFrame(tick)
+  newEvents = []
+  window.requestAnimationFrame(process)
 }
 
-tick()
+let read = function() {
+  let s = runner.read()
+  debugUI.update(s)
+  newEvents = newEvents.concat(s.events)
+  window.requestAnimationFrame(read)
+}
+
+read()
+process()
 
 input.focus()

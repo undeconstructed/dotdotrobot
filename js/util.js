@@ -35,6 +35,10 @@ export function distance (p1, p2) {
   return Math.sqrt(dx*dx + dy*dy)
 }
 
+export function toRadians (degrees) {
+  return (degrees - 90) / 180 * Math.PI
+}
+
 export function popN(s, n) {
   if (s.length < n) {
     throw new Error('UNDERFLOW')

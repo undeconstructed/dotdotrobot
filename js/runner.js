@@ -2,7 +2,7 @@
 import Game from './game.js'
 
 // all globals here to keep them out of the exported object
-let hz = 1
+let hz = 10
 let game = new Game(hz)
 let commands = []
 let events = []

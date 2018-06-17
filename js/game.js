@@ -1,8 +1,98 @@
 
-import { assert, split, join, distance, popN, popArgs } from './util.js'
+import { assert, split, join, distance, toRadians, popN, popArgs } from './util.js'
 import * as random from './random.js'
 import Machine from './machine.js'
 import * as lang from './lang.js'
+
+/**
+ * Action helps writing behaviours that take a little while.
+ */
+class Action {
+  tick () {
+    return true
+  }
+}
+
+class ProgressAction extends Action {
+  constructor (ticks) {
+    super()
+    this.ticks = ticks || 2
+    this.started = false
+  }
+  start () {}
+  tick () {
+    if (!this.started) {
+      this.start()
+      this.started = true
+    }
+    this.ticks--
+    this.onTick()
+    if (this.ticks === 0) {
+      this.end()
+      return true
+    }
+    return false
+  }
+  onTick () {
+  }
+  end () {}
+}
+
+const IDENTITY = (e => e)
+
+class AutoAction extends ProgressAction {
+  constructor (ticks, start, tick, end) {
+    super(ticks)
+    this.onstart = start || IDENTITY
+    this.ontick = tick || IDENTITY
+    this.onend = end || IDENTITY
+  }
+  start () {
+    this.onstart()
+  }
+  onTick () {
+    this.ontick()
+    return true
+  }
+  end () {
+    this.onend()
+  }
+}
+
+/**
+ * Action runs actions, and knows if it is busy.
+ */
+class ActionQueue {
+  constructor (length) {
+    this.maxLength = length
+    this.actions = []
+  }
+  get busy () {
+    return this.actions.length > 0
+  }
+  get full () {
+    return this.actions.length === this.maxLength
+  }
+  add (opts) {
+    if (this.full) {
+      console.log('full')
+      return false
+    }
+    let action = opts
+    if (!(action instanceof Action)) {
+      action = new AutoAction(opts.ticks, opts.start, opts.tick, opts.end)
+    }
+    this.actions.push(action)
+  }
+  tick () {
+    if (this.busy) {
+      let done = this.actions[0].tick()
+      if (done) {
+        this.actions.shift()
+      }
+    }
+  }
+}
 
 /**
  * DotLive is all the things in the game that have some sort of life.
@@ -87,10 +177,11 @@ class Area extends DotObject {
       child.tick()
     }
     for (let child of this.children) {
-      if (child.motion) {
+      if (child.motion && child.motion.p) {
         let m = child.motion
-        let nx = child.position.x + m.x
-        let ny =  child.position.y + m.y
+        let [dx, dy] = this.motionToMap(m)
+        let nx = child.position.x + dx
+        let ny =  child.position.y + dy
         if (nx < 0) nx = 0
         if (ny < 0) ny = 0
         if (nx > this.w) nx = this.w
@@ -98,7 +189,7 @@ class Area extends DotObject {
         child.position.x = nx
         child.position.y = ny
         // motion stops immediately for now
-        child.motion = { x: 0, y: 0 }
+        child.motion = null
       }
     }
   }
@@ -124,22 +215,34 @@ class Area extends DotObject {
     }
     return false
   }
-  visibleTo (child) {
+  visibleTo (child, distance = 10) {
     let out = []
     for (let e of this.children) {
       if (e === child) {
         continue
       }
-      let dist = distance(child.position, e.position)
-      if (dist < 50) {
+      let [b, d] = this.mapToMotion(e.position.x - child.position.x, e.position.y - child.position.y)
+      if (d < distance) {
         out.push({
-          x: child.position.x - e.position.x,
-          y: child.position.y - e.position.y,
+          direction: b,
+          distance: d,
           e: e
         })
       }
     }
     return out
+  }
+  motionToMap (motion) {
+    // no resistence for now
+    let magnitude = motion.p
+    let x = magnitude * Math.cos(motion.d)
+    let y = magnitude * Math.sin(motion.d)
+    return [x, y]
+  }
+  mapToMotion (dx, dy) {
+    let m = Math.sqrt(dx**2 + dy**2)
+    let b = Math.atan2(dy, dx)
+    return [b, m]
   }
   toString () {
     if (this.children.size > 0) {
@@ -362,6 +465,17 @@ class SimpleComposite extends Programmable {
     super(run, opts)
     this.slots = new Set()
     this.parts = new Map()
+    // hardware functions
+    this.addHardWord('list-slots', (m, s) => {
+      return [...this.slots]
+    })
+    this.addHardWord('list-parts', (m, s) => {
+      let list = {}
+      this.parts.forEach((v, k) => {
+        list[k] = v.toString()
+      })
+      return list
+    })
   }
   addSlot (name) {
     this.slots.add(name)
@@ -436,11 +550,14 @@ class SimpleComponent extends DotLive {
  * ScannerCore is functionality of a scanner, for use in components etc.
  */
 class ScannerCore {
+  constructor (range = 5) {
+    this.range = range
+  }
   scan (host) {
     let near = host.area.visibleTo(host.piece)
     let o = near.map(e => ({
-      x: e.x,
-      y: e.y,
+      direction: e.direction,
+      distance: e.distance,
       size: e.e.size,
       colour: e.e.colour
     }))
@@ -489,30 +606,26 @@ class ScannerSimpleComponent extends SimpleComponent {
     super(run, {
       ops: {
         'scan': (m, s) => {
-          if (this.scanning > 0) {
-            s.push('already scanning')
-            return
+          if (this.actions.busy) {
+            return s.push('busy')
           }
-          let args = popArgs(s, [ 'target', 'hook' ])
-          this.args = args
-          this.scanning = this.timeToScan
+          let args = popArgs(s, [ 'hook' ])
+          this.actions.add({ end: () => this._scan(args), ticks: this.timeToScan })
           s.push('scanning')
         }
       }
     })
-    this.core = new ScannerCore()
-    this.scanning = 0
-    this.timeToScan = 1 * this.hz
+    this.core = new ScannerCore(10)
+    this.actions = new ActionQueue()
+    this.timeToScan = 0.1 * this.hz
+  }
+  _scan (args) {
+    let o = this.core.scan(this.owner)
+    this.owner.machine.setVariable("seen", o)
+    this.owner.command({ src: `"seen" load ${args.hook}` })
   }
   tick () {
-    if (this.scanning > 0) {
-      if ((--this.scanning) <= 0) {
-        this.scanning = 0
-        let o = this.core.scan(this.owner)
-        this.owner.machine.setVariable(this.args.target, o)
-        this.owner.command({ src: this.args.hook })
-      }
-    }
+    this.actions.tick()
   }
   toString () {
     return 'scanner ' + super.toString()
@@ -657,97 +770,153 @@ class ArmSimpleComponent extends SimpleComponent {
     super(run, {
       ops: {
         'grab': (m, s) => {
+          let args = popArgs(s, [ 'direction', 'hook' ])
+          if (this.actions.busy) {
+            return s.push('busy')
+          }
           if (this.holding) {
-            s.push('already holding!')
-            return
+            return s.push('already holding!')
           }
-          if (this.grabbing > 0) {
-            s.push('already grabbing!')
-          }
-          let args = popArgs(s, [ 'hook' ])
-          this.args = args
-          this.grabbing = this.timeToGrab
+          this.actions.add({ end: () => this._grab(args), ticks: this.timeToGrab })
           s.push('grabbing...')
         },
         'release': (m, s) => {
-          if (this.holding) {
-            if (this.holding.socket) {
-              this.holding.socket.unplug()
-            }
-            this.holding.move(this.owner.area, this.holding.position)
-            s.push('ok')
-          } else {
-            s.push('not holding anything!')
+          let args = popArgs(s, [ 'hook' ])
+          if (this.actions.busy) {
+            return s.push('busy')
           }
+          if (!this.holding) {
+            return s.push('not holding anything!')
+          }
+          this.actions.add({ end: () => this._release(args), ticks: this.timeToRelease })
+          s.push('releasing...')
         },
         'holding': (m, s) => {
-          if (this.holding) {
-            s.push(this.holding.toString())
-          } else {
-            s.push('nothing')
+          if (!this.holding) {
+            return s.push(null)
           }
+          s.push(this.holding.toString())
         },
         'tell': (m, s) => {
-          let [src] = popN(s, 1)
-          if (this.holding) {
-            let socket = this.holding.socket
-            if (socket) {
-              // XXX - is this right place to compile?
-              let app = lang.parse(src)
-              let cmd = [ 'queue', [ null, app ] ]
-              socket.send(cmd)
-              s.push('ok')
-              return
-            } else {
-              s.push('no socket')
-              return
-            }
+          let args = popArgs(s, [ 'src', 'hook' ])
+          // XXX - is this right place to compile?
+          let app = lang.parse(args.src)
+          if (this.actions.busy) {
+            return s.push('busy')
           }
-          s.push('not holding anything!')
+          if (!this.holding) {
+            return s.push('not holding anything!')
+          }
+          let socket = this.holding.socket
+          if (!socket) {
+            return s.push('no socket')
+          }
+          let cmd = [ 'queue', [ null, app ] ]
+          this.holding.socket.send(cmd)
+          this.actions.add({ end: () => {
+            let data = this.holding.socket.recv()
+            this.owner.machine.setVariable('just-read', data)
+            this.owner.command({ src: `"just-read" load ${args.hook}` })
+          } })
+          s.push('ok')
         },
-        'copy': (m, s) => {
-          let args = popArgs(s, ['data', 'name'])
-          if (this.holding) {
-            let socket = this.holding.socket
-            if (socket) {
-              let cmd = [ 'write', [ args.name, args.data ] ]
-              socket.send(cmd)
-              s.push('ok')
-              return
-            } else {
-              s.push('no socket')
-              return
-            }
+        'read': (m, s) => {
+          let args = popArgs(s, ['name', 'hook'])
+          if (this.actions.busy) {
+            return s.push('busy')
           }
-          s.push('not holding anything!')
+          if (!this.holding) {
+            return s.push('not holding anything!')
+          }
+          let socket = this.holding.socket
+          if (!socket) {
+            return s.push('no socket')
+          }
+          let cmd = [ 'read', [ args.name ] ]
+          this.holding.socket.send(cmd)
+          this.actions.add({ end: () => {
+            let data = this.holding.socket.recv()
+            this.owner.machine.setVariable('just-read', data[2])
+            this.owner.command({ src: `"just-read" load ${args.hook}` })
+          } })
+          s.push('ok')
+        },
+        'recv': (m, s) => {
+          let data = this.holding.socket.recv()
+          s.push(data)
+        },
+        'write': (m, s) => {
+          let args = popArgs(s, ['data', 'name'])
+          if (this.actions.busy) {
+            return s.push('busy')
+          }
+          if (!this.holding) {
+            return s.push('not holding anything!')
+          }
+          let socket = this.holding.socket
+          if (!socket) {
+            return s.push('no socket')
+          }
+          let cmd = [ 'write', [ args.name, args.data ] ]
+          this.holding.socket.send(cmd)
+          this.actions.add({ end: () => {
+            let data = this.holding.socket.recv()
+            this.owner.machine.setVariable('just-read', data)
+            this.owner.command({ src: `"just-read" load ${args.hook}` })
+          } })
+          s.push('ok')
         }
       }
     })
     this.core = new ArmCore()
-    this.grabbing = 0
-    this.timeToGrab = 5 * this.hz
+    this.actions = new ActionQueue(1)
+    this.timeToGrab = 3 * this.hz
+    this.timeToRelease = 0.5 * this.hz
     this.holding = null
   }
-  tick () {
-    if (this.grabbing > 0) {
-      if ((--this.grabbing) <= 0) {
-        this.grabbing = 0
-        let near = this.owner.area.visibleTo(this.owner.piece)
-        for (let e of near) {
-          if (e.e.move(this.owner)) {
-            if (this.holding.socket) {
-              this.holding.socket.plug(this)
-            }
-            break
-          }
+  _grab (args) {
+    // let direction = toRadians(args.direction)
+    let direction = args.direction
+    let near = this.owner.area.visibleTo(this.owner.piece)
+    near.sort((a, b) => a.distance - b.distance)
+    for (let e of near) {
+      if (e.distance < 5) {
+        // very close things confuse the directions
+      } else {
+        let diff = Math.abs(e.direction - direction)
+        if (diff > 0.3) {
+          continue
         }
-        this.owner.command({ src: this.args.hook })
+      }
+      if (e.e.move(this.owner)) {
+        if (this.holding.socket) {
+          this.holding.socket.plug(this)
+        }
+        break
       }
     }
+    this.owner.command({ src: `${args.hook}` })
+  }
+  _release (args) {
+    if (this.holding.socket) {
+      this.holding.socket.unplug()
+    }
+    this.holding.move(this.owner.area, this.owner.position)
+    this.owner.command({ src: `${args.hook}` })
+  }
+  tick () {
+    this.actions.tick()
     if (this.holding) {
       this.holding.tick()
       // stop the thing dead
       this.holding.motion = null
+      // let socket = this.holding.socket
+      // if (socket) {
+      //   let data = socket.recv()
+      //   if (data) {
+      //     this.owner.machine.setVariable('just-read', data)
+      //   }
+      // }
     }
   }
   accept (o) {
@@ -875,11 +1044,18 @@ class SimplePlayer extends SimpleComposite {
       })
     })
     // some default words
-    this.compileWord('look', '"seen" "on-scan" eye-scan ;')
-    this.compileWord('on-scan', '"seen" load to-json "seen" return ;')
+    this.compileWord('look', '"on-scan" eye-scan ;')
+    this.compileWord('on-scan', 'to-json "seen" return "look" queue ;')
     this.compileWord('grab', '"on-grab" arm-1-grab ;')
     this.compileWord('on-grab', 'arm-1-holding "grabbed" return ;')
-    this.compileWord('release', 'arm-1-release ;')
+    this.compileWord('program', '`"explore" in-a-second` "on-program" arm-1-tell ;')
+    this.compileWord('on-program', '"done" "programmed" return release ;')
+    this.compileWord('release', '"on-release" arm-1-release ;')
+    this.compileWord('on-release', '"done" "released" return ;')
+    this.compileWord('read', '"seen" "on-read" arm-1-read')
+    this.compileWord('on-read', 'to-json "seen" return ;')
+
+    this.compileWord('idle', 'look "idle" delete ;')
   }
   tick () {
     super.tick()
@@ -903,6 +1079,7 @@ class Player extends SimplePlayer {
     this.compileWord('help', '"try typing list-programs" ;"')
     this.compileWord('get-state', 'state "state" return "ok" ;')
     this.compileWord('set-idle', '"idle" compile ;')
+    this.compileWord('degrees', '90 - 180 / pi * ;')
   }
   startTick (commands) {
     this.events = []
@@ -945,40 +1122,90 @@ class Robot1 extends Programmable {
     this.socket0 = this.machine.newSocket()
     this.machine.setVariable('name', name)
     this.time = 0
-    this.power = { x: 0, y: 0 }
+    this.power = { d: 0, p: 0 }
+    this.actions = new ActionQueue(1)
     // hardwired components
     this.scanner = new ScannerCore()
     // ops
+    this.addHardWord('in-a-second', (m, s) => {
+      let args = popArgs(s, ['hook'])
+      this.actions.add({
+        end: () => {
+          this.command({ src: args.hook })
+        },
+        ticks: this.hz
+      })
+    })
+    this.machine.addHardWord('drive', (m, s) => {
+      let args = popArgs(s, ['direction', 'power', 'seconds', 'hook'])
+      // args.direction = toRadians(args.bearing)
+      this.actions.add({
+        start: () => {
+          this.power = { d: args.direction, p: args.power / this.hz }
+          // console.log('start', this.power, this.position)
+        },
+        end: () => {
+          this.power.p = 0
+          // console.log('end', this.power, this.position)
+          this.command({ src: args.hook })
+        },
+        ticks: args.seconds * this.hz
+      })
+    })
     this.machine.addHardWord('power', (m, s) => {
-      let [y, x] = [s.pop(), s.pop()]
-      this.power.x = x
-      this.power.y = y
+      let [d, p] = popN(s, 2)
+      this.power.d = x
+      this.power.p = y
     })
     this.machine.addHardWord('scan', (m, s) => {
-      let o = this.scanner.scan(this)
-      s.push(o)
+      let args = popArgs(s, ['hook'])
+      this.actions.add({ end: () => this._scan(args), ticks: 1 * this.hz })
     })
     // programs
-    this.compileWord('doodle', ':r 0 4 rand 2 - ; r r power ;')
-    this.compileWord('explore', '1 ;')
+    this.compileWord('degrees', '90 - 180 / pi * ;')
+    this.compileWord('explore', '0 degrees 3 5 "on-arrive" drive ;')
+    this.compileWord('on-arrive', '"on-scan" scan ;')
+    this.compileWord('on-scan', '180 degrees 3 5 "i" drive ;')
+
+    this.compileWord('north', '180 degrees 2 5 "south" drive ;')
+    this.compileWord('south', '0 degrees 2 5 "north" drive ;')
+    // this.compileWord('idle', 'north "idle" delete ;')
   }
   get socket () {
     return this.socket0
   }
+  _scan (args) {
+    let o = this.scanner.scan(this)
+    this.machine.setVariable('seen', o)
+    this.command({ src: `"seen" load ${args.hook}` })
+  }
   tick () {
     this.n++
+    // XXX is this the right place in the sequence ?
+    this.actions.tick()
     super.tick()
     if (this.machine.timeLeft > 0 && this.machine.hasWord('idle')) {
       this.command({ src: 'idle' })
       this.machine.execute()
     }
-    this.motion = { x: this.power.x, y: this.power.y }
-    for (let r of this.results()) {
-      this.socket0.push([ 'res', r ])
+    this.motion = { d: this.power.d, p: this.power.p }
+    if (this.machine.getVariable('debug')) {
+      for (let r of this.results()) {
+        this.socket0.push([ 'res', r ])
+      }
     }
   }
   toString () {
     return `${this.colour} robot '${this.machine.getVariable('name')}' ` + super.toString()
+  }
+}
+
+class Box extends DotObject {
+  constructor (run, opts) {
+    super(run, opts)
+  }
+  toString () {
+    return 'box'
   }
 }
 
@@ -989,16 +1216,21 @@ class Run {
   constructor (hz) {
     this.hz = hz
     this.n = 0
-    this.world = new World(this, 100, 100)
+    this.world = new World(this, 1000, 1000)
     this.player = new Player(this)
-    this.player.place(this.world, { x: 10, y: 20 })
-    this.addRandomRobot({ x: 12, y: 16 })
-    this.addRandomRobot({ x: 1, y: 1 })
-    this.addRandomRobot({ x: 8, y: 22 })
-    this.addRandomRobot({ x: 80, y: 90 })
+    this.player.place(this.world, { x: 500, y: 500 })
+    this.addRandomRobot({ x: 502, y: 505 })
+    // this.addRandomRobot({ x: 1, y: 1 })
+    // this.addRandomRobot({ x: 8, y: 22 })
+    // this.addRandomRobot({ x: 80, y: 90 })
+    this.addSomeThings()
   }
   addRandomRobot (opts) {
     new Robot1(this, random.name(), random.colour()).place(this.world, opts)
+  }
+  addSomeThings () {
+    new Box(this).place(this.world, { x: 503, y: 400})
+    new Box(this).place(this.world, { x: 503, y: 484})
   }
   accept () {
     return false

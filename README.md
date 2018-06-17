@@ -124,10 +124,19 @@ release
 ```
 
 ```
-# another robot program
+# using all the pre-programmed things
+160 degrees grab
+program
+160 degrees grab
+read
+```
+
+```
+# a complicated robot program
 `dup "count" store "n" store 1 "d" store ;` "robsetup" compile
 `
 :go "d" load 3 * dup log 0 power ;
+:stop 0 0 power ;
 :flip "d" load 1 = dup if 0 1 - "d" store "count" load "n" store ; invert if 0 "d" store ; ;
 "n" load 1 - dup "n" store 0 = dup if "d" load 1 = if scan "seen" store ; flip ; invert if go ; ;`
 "robrun" compile

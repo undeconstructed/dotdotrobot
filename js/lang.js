@@ -269,6 +269,9 @@ export const ops = {
     let [v] = popN(s, 1)
     let json = JSON.stringify(v)
     s.push(json)
+  },
+  'pi': (m, s) => {
+    s.push(Math.PI)
   }
 }
 

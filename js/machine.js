@@ -1,5 +1,5 @@
 
-import { split } from './util.js'
+import { split, popN, popArgs } from './util.js'
 import * as lang from './lang.js'
 
 const Q = Symbol('q')
@@ -73,7 +73,7 @@ class Socket {
       // this is the component control protocol
       switch (input[0]) {
       case 'read': {
-        let name = input[1]
+        let name = input[1][0]
         let value = this.machine.memory.get(name)
         this.outputBus.push([ 'read', name, value ])
         break
@@ -115,7 +115,7 @@ export default class Machine {
     // machine level hardWords
     this.addHardWord('compile', (m, s) => {
       // this compiles and installs a program
-      let [name, src] = [s.pop(), s.pop()]
+      let [src, name] = popN(s, 2)
       let app = null
       try {
         app = lang.parse(src)
@@ -124,10 +124,10 @@ export default class Machine {
         return
       }
       this.installWord(name, { app, src })
-      s.push('ok')
     })
     this.addHardWord('queue', (m, s) => {
-      let cmd = { src: s.pop() }
+      let [src] = popN(s, 1)
+      let cmd = { src }
       try {
         cmd.app = lang.parse(cmd.src)
       } catch (e) {
@@ -141,20 +141,20 @@ export default class Machine {
       s.push(l)
     })
     this.addHardWord('describe-word', (m, s) => {
-      let name = s.pop()
+      let [name] = popN(s, 1)
       let d = this.describeWord(name)
       s.push(d)
     })
     this.addHardWord('delete', (m, s) => {
-      let k = s.pop()
-      m.delete(k)
+      let [name] = popN(s, 1)
+      m.delete(name)
     })
     this.addHardWord('store', (m, s) => {
-      let [name, data] = [s.pop(), s.pop()]
+      let [data, name] = popN(s, 2)
       m.set(name, data)
     })
     this.addHardWord('load', (m, s) => {
-      let name = s.pop()
+      let [name] = popN(s, 1)
       let data = m.get(name)
       s.push(data)
     })
