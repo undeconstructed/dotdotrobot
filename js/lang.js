@@ -12,11 +12,10 @@ const IF = Symbol('if')
 const LOOP = Symbol('loop')
 const END = Symbol('end')
 
+// parses/"compiles" source code
+// returns a collection of identifiers, where "main" is the entry point
 function parse (s) {
-  s = s.trimRight()
-  if (!s.endsWith(';')) {
-    s += ' ; '
-  }
+  s = s.trimRight() + ' \0'
 
   let apps = {}
 
@@ -54,6 +53,10 @@ function parse (s) {
           // hopefully this is end of the program
           break
         }
+      } else if (c === '\0') {
+        // allowing for a missing final ;
+        frame.symbols.push({ t: END })
+        break
       } else if (c === ':') {
         i = DEF
         n = ''
@@ -170,7 +173,8 @@ function parse (s) {
   return apps
 }
 
-export const ops = {
+// basic stack-only operations, the machine arg should not be used
+export const OPS = {
   'i': (m, s) => {},
   '+': (m, s) => {
     let [a, b] = popN(s, 2)
@@ -242,6 +246,21 @@ export const ops = {
   'clear': (m, s) => {
     s.length = 0
   },
+  'pull-up': (m, s) => {
+    let [n] = popN(s, 1)
+    let x = null
+    function r(n) {
+      if (n) {
+        let e = s.pop()
+        r(n - 1)
+        s.push(e)
+      } else {
+        x = s.pop()
+      }
+    }
+    r(n)
+    s.push(x)
+  },
   'print': (m, s) => {
     let [v] = popN(s, 1)
     console.log(v)
@@ -272,20 +291,35 @@ export const ops = {
   },
   'pi': (m, s) => {
     s.push(Math.PI)
+  },
+  'dump-stack': (m, s) => {
+    console.log(JSON.stringify(s))
   }
 }
 
+// p is the program to run, if started a new program
+// opts is a collection of options, which can be an entire state when continuing an execution
+// returns an update opts object, which is either paused or has a result
 function run (p, opts) {
   opts = opts || {}
+  // if no program, then this is a continuation
   p = p || opts.frame.a
-  let s = opts.s = opts.s || []
-  let m = opts.m = opts.m || {}
-  let cOps = opts.extraOps = opts.extraOps || {}
+  // if no stack, create one
+  let stack = opts.stack = opts.stack || []
+  // if no machine, then no problem, run on a complete abstract
+  let machine = opts.machine
+  // more operations
+  let extraOps = opts.extraOps = opts.extraOps || {}
+  // how to load dynamic words
   let loadWord = opts.loadWord = opts.loadWord || (name => null)
+  // how long to run the execution before pausing
   let runFor = opts.runFor = opts.runFor || -1
+  // the active frame
   let frame = opts.frame || ({ a: p, f: p['main'], n: 0, parent: null })
 
+  // how many ops executed in this run
   let opsRun = 0
+  // whether we finish or have to pause
   let paused = false
 
   while (true) {
@@ -303,14 +337,14 @@ function run (p, opts) {
         }
       }
     } else if (c.t === IF) {
-      let b = s.pop()
+      let b = stack.pop()
       if (b) {
         let sub = frame.a[c.v]
         // console.log('enter if', c.v)
         frame = { a: frame.a, f: sub, n: 0, parent: frame }
       }
     } else if (c.t === LOOP) {
-      let [b, a] = [s.pop(), s.pop()]
+      let [b, a] = [stack.pop(), stack.pop()]
       let times = a - b
       if (times > 0) {
         let sub = frame.a[c.v]
@@ -322,34 +356,39 @@ function run (p, opts) {
         let oc = c
         c = {
           t: WORD,
-          v: s.pop()
+          v: stack.pop()
         }
       }
-      let op = ops[c.v]
+      let op = OPS[c.v]
       if (op) {
-        op(m, s)
+        // this is a core operation
+        op(machine, stack)
       } else {
-        op = cOps[c.v]
+        op = extraOps[c.v]
         if (op) {
-          op(m, s)
+          // this is an extra operation
+          op(machine, stack)
         } else {
           let sub = frame.a[c.v]
           if (sub) {
+            // this is label in the current program
             // console.log('enter sub', c.v)
             frame = { a: frame.a, f: sub, n: 0, parent: frame }
           } else {
             let ext = loadWord(c.v)
             if (ext) {
+              // this is a dynamic word
               // console.log('enter ext', c.v)
               frame = { a: ext.app, f: ext.app['main'], n: 0, parent: frame }
             } else {
+              // this is a runtime error
               throw new Error('NOWORD ' + c.v)
             }
           }
         }
       }
     } else {
-      s.push(c.v)
+      stack.push(c.v)
     }
     opsRun++
     if (runFor > 0 && opsRun > runFor) {
@@ -360,7 +399,8 @@ function run (p, opts) {
   }
 
   if (!paused) {
-    opts.res = s[s.length - 1]
+    // result is the top of the stack
+    opts.res = stack[stack.length - 1]
   } else {
     opts.frame = frame
   }
@@ -370,6 +410,7 @@ function run (p, opts) {
   return opts
 }
 
+// stupid little testing function
 function t (src) {
   console.log(src)
   let p = parse(src)

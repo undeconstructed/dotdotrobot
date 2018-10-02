@@ -1,71 +1,179 @@
 
 import runner from './runner.js'
+import * as lang from './lang.js'
+import OS from './os.js'
 
-// expose the game interface for old fashioned scripts
-window.game = runner
+// for running code in the browser
+window.lang = function (src) {
+  return lang.run(lang.parse(src)).s
+}
+
+// some debuggy stuff
 
 const mapper = (k, v) => (v instanceof Set || v instanceof Map ? Array.from(v) : v)
 
-class Grid {
-  constructor (element) {
-    this.element = element
-  }
-  add (cell, placement) {
-    cell.element.style.gridArea = placement
-    this.element.appendChild(cell.element)
-  }
+function timeF(d) {
+  let [h, m, s] = [d.getHours(), d.getMinutes(), d.getSeconds()]
+  return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`
 }
 
-class Cell {
-  constructor (name) {
-    this.element = document.createElement('div')
-    this.element.className = 'cell'
-    if (name) {
-      let title = document.createElement('h3')
-      title.textContent = name
-      this.element.appendChild(title)
-    }
+class DebugUI {
+  constructor () {
     this.box = document.createElement('div')
-    this.box.className = 'box'
-    this.element.appendChild(this.box)
+    this.box.className = 'debugui'
+    document.body.appendChild(this.box)
+  }
+  update (s) {
+    this.box.textContent = `n = ${s.n}`
   }
 }
 
-class Title extends Cell {
-  constructor() {
-    super()
-    this.element.removeChild(this.box)
-    let title = document.createElement('h1')
-    title.textContent = '. . robot'
-    this.element.appendChild(title)
+let debugUI = new DebugUI()
+
+// the OS and everything comes now
+
+class StatusCmd {
+  main (os) {
+    os.write(1, 'no good')
+    os.exit()
   }
 }
 
-class State extends Cell {
+class Shell {
   constructor () {
-    super('state')
-    this.box.classList.add('drawn')
-    this.area = document.createElement('div')
-    this.box.appendChild(this.area)
+    this.prompt = '$ '
   }
-  update (data) {
-    this.area.textContent = JSON.stringify(data, mapper, '  ')
+  main (os) {
+    this.os = os
+    this.window = os.newWindow('console', 'shell')
+    this.window.moveTo(50, 50)
+    this.window.resize(600, 400)
+    this.scroller = document.createElement('div')
+    this.scroller.classList.add('scroller')
+    this.scroller.addEventListener('click', (e) => {
+      this.inputBox.focus()
+    })
+    this.drawnLines = document.createElement('ul')
+    this.scroller.appendChild(this.drawnLines)
+    this.inputLine = document.createElement('div')
+    this.inputLine.classList.add('inputline')
+    this.promptBox = document.createElement('span')
+    this.promptBox.textContent = this.prompt
+    this.inputLine.appendChild(this.promptBox)
+    this.inputBox = document.createElement('input')
+    this.inputBox.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        let i = this.inputBox.value
+        this.inputBox.value = ''
+        if (i) {
+          this.onInput(i)
+        }
+        this.inputBox.focus()
+      }
+    })
+    this.inputLine.appendChild(this.inputBox)
+    this.scroller.appendChild(this.inputLine)
+    this.window.setBody(this.scroller)
+  }
+  onInput (i) {
+    if (this.proc) {
+      // forward to the running app
+      this.os.write(this.proc.in, i)
+    } else {
+      // try to launch an app
+      this.addLine(i)
+      this.run(i)
+    }
+  }
+  run (i) {
+    this.proc = this.os.launch(i)
+    this.addLine('launched ', this.proc)
+    if (this.proc) {
+      this.prompt0 = this.prompt
+      this.prompt = ''
+      this.os.read(this.proc.out, 'fromapp')
+    }
+  }
+  wake (tag, data) {
+    if (tag === 'fromapp') {
+      this.onOutput(data)
+      this.os.read(this.proc.out, 'fromapp')
+    } else if (tag === 'exit') {
+      this.onExit()
+    }
+  }
+  onOutput (e) {
+    this.addLine(e)
+  }
+  onExit () {
+    this.proc = null
+    this.prompt = this.prompt0
+  }
+  addLine (i) {
+    let e = document.createElement('li')
+    e.textContent = this.prompt + ' ' + i
+    this.drawnLines.appendChild(e)
   }
 }
 
-class Map extends Cell {
+class Hinter {
   constructor () {
-    super('map')
-    this.data = []
+    this.lines = [
+      'ah nuts, the world\'s been destroyed again. let\'s see what we can put back together.',
+      'okay, plugged the old laptop into the control centre, lets see what can be done',
+      'right, let\'s open a shell and see what\'s working, the status command should work'
+    ]
+    this.whichLine = 0
+  }
+  main (os) {
+    this.os = os
+    this.window = os.newWindow('hinter', 'story')
+    this.view = document.createElement('div')
+    this.line = document.createElement('p')
+    this.line.textContent = this.lines[this.whichLine]
+    this.view.appendChild(this.line)
+    let nextButton = document.createElement('button')
+    nextButton.textContent = 'more?'
+    nextButton.addEventListener('click', (e) => {
+      if (this.whichLine < this.lines.length -1 ) {
+        this.whichLine++
+        this.line.textContent = this.lines[this.whichLine]
+      }
+    })
+    this.view.appendChild(nextButton)
+    this.window.setBody(this.view)
+    this.window.moveTo(100, 100)
+  }
+  wake () {}
+}
+
+class StateViewer {
+  main (os) {
+    this.os = os
+    this.window = os.newWindow('viewer', 'state')
+    this.text = document.createElement('div')
+  }
+  update (e) {
+    this.text.textContent = JSON.stringify(e.val, mapper, '  ')
+  }
+}
+
+class Radar {
+  constructor () {
+    this.data = new Map()
     this.w = 800
     this.h = 800
     this.scale = 10
     this.mouse = { x: 0, y: this.h / -2 }
+  }
+  main (os) {
+    this.os = os
+    this.window = os.newWindow('hinter', 'radar')
     this.canvas = document.createElement('canvas')
     this.canvas.width = this.w
     this.canvas.height = this.h
     // this.canvas.style = 'height: 100%; width: 100%;'
-    this.box.appendChild(this.canvas)
+    this.window.setBody(this.canvas)
     this.canvas.addEventListener('mousemove', e => {
       let [sx, sy] = [this.box.scrollLeft, this.box.scrollTop]
       let [cx, cy] = [e.x - this.canvas.offsetLeft + sx, e.y - this.canvas.offsetTop + sy]
@@ -80,24 +188,12 @@ class Map extends Cell {
     let ctx = this.canvas.getContext('2d')
     // ctx.globalCompositeOperation = 'destination-over'
     ctx.clearRect(0, 0, this.w, this.h)
-    this.drawScanRange(ctx)
     // ctx.globalCompositeOperation = 'source-out'
     this.drawGrid(ctx)
     this.drawSelf(ctx)
     this.drawData(ctx)
     this.drawPointerLine(ctx)
     window.requestAnimationFrame(() => this.draw())
-  }
-  drawScanRange (ctx) {
-    // ctx.save()
-    ctx.fillStyle = 'rgb(255,255,255,0.5)'
-    // ctx.strokeStyle = 'rgb(0,0,0)'
-    ctx.beginPath()
-    ctx.arc(this.w / 2, this.h / 2, 10 * this.scale, 0, Math.PI * 2, true)
-    // ctx.clip()
-    // ctx.stroke()
-    ctx.fill()
-    // ctx.restore()
   }
   drawGrid (ctx) {
     let gap = 50
@@ -124,21 +220,52 @@ class Map extends Cell {
     ctx.save()
     let alpha = 1
     let fade = 0.5
-    for (let set of this.data) {
-      ctx.fillStyle = `rgb(0,255,0,${alpha})`
-      // ctx.strokeStyle = `rgb(0,0,0,${alpha})`
-      for (let e of set) {
-        ctx.beginPath()
-        let dx = e.distance * Math.cos(e.direction)
-        let dy = e.distance * Math.sin(e.direction)
-        let x = this.w / 2 + dx * this.scale
-        let y = this.h / 2 + dy * this.scale
-        ctx.arc(x, y, 10, 0, Math.PI * 2, true)
-        ctx.fill()
-        // ctx.stroke()
+    for (let [who, what] of [...this.data]) {
+      let s1 = true
+      for (let set of what) {
+        let x0 = this.w / 2 + set.x * this.scale
+        let y0 = this.h / 2 + set.y * this.scale
+        if (s1) {
+          s1 = false
+          if (who !== 'self') {
+            this.drawScanPoint(ctx, x0, y0)
+          }
+          this.drawScanRange(ctx, x0, y0, set.range)
+        }
+        ctx.fillStyle = `rgb(0,255,0,${alpha})`
+        for (let e of set.data) {
+          ctx.beginPath()
+          let dx = e.distance * Math.cos(e.direction)
+          let dy = e.distance * Math.sin(e.direction)
+          let x = x0 + dx * this.scale
+          let y = y0 + dy * this.scale
+          ctx.arc(x, y, 10, 0, Math.PI * 2, true)
+          ctx.fill()
+          alpha = alpha * fade
+        }
       }
-      alpha = alpha * fade
     }
+    ctx.restore()
+  }
+  drawScanRange (ctx, x, y, r) {
+    // ctx.save()
+    ctx.fillStyle = 'rgb(255,255,255,0.5)'
+    // ctx.strokeStyle = 'rgb(0,0,0)'
+    ctx.beginPath()
+    ctx.arc(x, y, r * this.scale, 0, Math.PI * 2, true)
+    // ctx.clip()Shell
+    // ctx.stroke()
+    ctx.fill()
+    // ctx.restore()
+  }
+  drawScanPoint (ctx, x, y) {
+    ctx.save()
+    ctx.fillStyle = 'black'
+    ctx.strokeStyle = 'rgb(0,0,0)'
+    ctx.beginPath()
+    ctx.arc(this.w / 2 + x * this.scale, this.h / 2 + y * this.scale, 5, 0, Math.PI * 2, true)
+    ctx.fill()
+    // ctx.stroke()
     ctx.restore()
   }
   drawSelf (ctx) {
@@ -171,170 +298,32 @@ class Map extends Cell {
   updateSelf (position) {
     this.self = position
   }
-  updateSeen (data) {
-    this.data.unshift(data)
-    if (this.data.length > 10) {
-      this.data.pop()
-    }
-  }
-}
-
-class Events extends Cell {
-  constructor () {
-    super('events')
-    this.console = new Console(this.box, e => { let n = e.n; delete e.n; return `${n}: ${JSON.stringify(e, mapper)}` })
-  }
-  add (ev) {
-    this.console.add(ev)
-  }
-}
-
-function timeF(d) {
-  let [h, m, s] = [d.getHours(), d.getMinutes(), d.getSeconds()]
-  return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`
-}
-
-class Input extends Cell {
-  constructor () {
-    super()
-    this.element.removeChild(this.element.firstChild)
-    let historyBox = document.createElement('div')
-    historyBox.classList.add('box')
-    historyBox.classList.add('history')
-    this.history = new Console(historyBox, e => `[${e.id}][${timeF(e.time)}] ${e.src}`, e => { this.reshow(e) })
-    this.element.appendChild(historyBox)
-    let buttonBox = document.createElement('div')
-    buttonBox.classList.add('box')
-    this.buttons = new Buttons(this, buttonBox)
-    this.element.appendChild(buttonBox)
-    let inputBox = document.createElement('div')
-    inputBox.innerHTML = '<form><input type="text" placeholder="$ ..."></form>'
-    this.element.appendChild(inputBox)
-    this.entry = new Entry(this, inputBox)
-    this.n = 1
-  }
-  reshow (cmd) {
-    this.entry.fillin(cmd.src)
-    this.entry.focus()
-  }
-  issue (src) {
-    let cmd = {
-      id: this.n++,
-      src: src
-    }
-    runner.command(cmd)
-    this.memo(cmd)
-  }
-  memo (cmd) {
-    cmd.time = new Date()
-    localStorage.setItem('lastCommand', JSON.stringify(cmd))
-    this.history.add(cmd)
-  }
-  focus () {
-    this.entry.focus()
-  }
-}
-
-class Console {
-  constructor (box, f, c) {
-    this.box = box
-    this.c = c || (e => true)
-    this.f = f || (e => JSON.stringify(e, mapper))
-    this.box = box
-    this.box.classList.add('lines')
-    this.list = document.createElement('ul')
-    this.box.appendChild(this.list)
-    this.entries = []
-  }
-  add (ev0) {
-    let e0 = document.createElement('li')
-    e0.textContent = `${this.f(ev0)}`
-    e0.addEventListener('click',  e => this.c(ev0))
-    this.list.appendChild(e0)
-    this.entries.push(e0)
-    if (this.entries.length > 50) {
-      this.list.removeChild(this.entries.shift())
-    }
-    this.list.scrollIntoView(false)
-  }
-}
-
-class Buttons {
-  constructor (parent, box) {
-    this.parent = parent
-    this.box = box
-    this.box.classList.add('buttons')
-    this.add('look')
-  }
-  add (tag, cmd) {
-    if (!cmd) {
-      cmd = tag
-    }
-    let b0 = document.createElement('button')
-    b0.textContent = tag
-    b0.addEventListener('click', e => {
-      this.parent.issue(cmd)
+  update (e) {
+    let input = JSON.parse(e.val)
+    let [name, x, y, range, timeout, data] = input
+    let list = this.data.get(name) || []
+    list.unshift({
+      source: name, x: x, y: y, range: range, t: timeout, data: data
     })
-    this.box.appendChild(b0)
+    if (list.length > timeout) {
+      list.pop()
+    }
+    this.data.set(name, list)
   }
 }
 
-class Entry {
-  constructor (parent, box) {
-    this.parent = parent
-    this.box = box
-    this.box.classList.add('entry')
-    let form = box.querySelector('form')
-    this.i = form.querySelector('input')
-    form.addEventListener('submit', e => {
-      e.preventDefault()
-      e.stopPropagation()
-      let line = this.i.value
-      if (line) {
-        this.parent.issue(line)
-      }
-      this.i.value = ''
-    })
-    form.addEventListener('keypress', e => {
-      e.stopPropagation()
-      return true
-    })
-  }
-  fillin (src) {
-    this.i.value = src
-  }
-  focus () {
-    this.i.focus()
-  }
-}
+let os = new OS(document.getElementById('main'))
+// apps
+os.addApp('status', StatusCmd)
+os.addApp('story', Hinter)
+os.addApp('radar', Radar)
+os.addApp('shell', Shell)
+// icons
+os.addIcon('huh', 'story')
+os.addIcon('shell', 'shell')
+os.addIcon('rader', 'radar')
 
-class DebugUI {
-  constructor () {
-    this.box = document.createElement('div')
-    this.box.className = 'debugui'
-    document.body.appendChild(this.box)
-  }
-  update (s) {
-    this.box.textContent = `n = ${s.n}`
-  }
-}
-
-let debugUI = new DebugUI()
-
-let grid = new Grid(document.getElementById('main'))
-// cells
-let map = new Map()
-let state = new State()
-let events = new Events()
-let input = new Input()
-
-// grid.add(new Title(), '1 / 1 / 1 / 3')
-grid.add(map, '2 / 1 / 4 / 1')
-grid.add(state, '2 / 2 / 2 / 2')
-grid.add(events, '3 / 2 / 3 / 2')
-grid.add(input, 'entry / 1 / entry / 3')
-
-map.centre()
+// this is just for the pause button
 
 window.addEventListener('keypress', e => {
   if (e.key === ' ') {
@@ -343,34 +332,13 @@ window.addEventListener('keypress', e => {
   }
 })
 
-let newEvents = []
-
-let process = function () {
-  for (let e of newEvents) {
-    // console.log(e)
-    switch (e.typ) {
-    case 'seen':
-      map.updateSeen(JSON.parse(e.val))
-      break
-    case 'state':
-      state.update(e.val)
-      break
-    default:
-      events.add(e)
-    }
-  }
-  newEvents = []
-  window.requestAnimationFrame(process)
-}
+// this connects the OS to the simulation
 
 let read = function() {
   let s = runner.read()
   debugUI.update(s)
-  newEvents = newEvents.concat(s.events)
+  os.tick(s)
   window.requestAnimationFrame(read)
 }
 
 read()
-process()
-
-input.focus()

@@ -5,7 +5,7 @@ import Machine from './machine.js'
 import * as lang from './lang.js'
 
 /**
- * Action helps writing behaviours that take a little while.
+ * HW: Action helps writing behaviours that take a little while.
  */
 class Action {
   tick () {
@@ -13,6 +13,9 @@ class Action {
   }
 }
 
+/**
+ * HW: ProgressAction takes several ticks to complete.
+ */
 class ProgressAction extends Action {
   constructor (ticks) {
     super()
@@ -40,6 +43,9 @@ class ProgressAction extends Action {
 
 const IDENTITY = (e => e)
 
+/**
+ * HW: AutoAction is a helper for writing ProgressActions inline.
+ */
 class AutoAction extends ProgressAction {
   constructor (ticks, start, tick, end) {
     super(ticks)
@@ -60,7 +66,7 @@ class AutoAction extends ProgressAction {
 }
 
 /**
- * Action runs actions, and knows if it is busy.
+ * HW: ActionQueue runs actions, and knows if it is busy.
  */
 class ActionQueue {
   constructor (length) {
@@ -95,7 +101,7 @@ class ActionQueue {
 }
 
 /**
- * DotLive is all the things in the game that have some sort of life.
+ * DotLive is all the things in the game that do something on each tick.
  */
 class DotLive {
   constructor (run) {
@@ -110,8 +116,7 @@ class DotLive {
 }
 
 /**
- * DotObject is all the things in the game that have some sort of life of their
- * own.
+ * DotObject is all the things in the game that have some sort of presence in the world.
  */
 class DotObject extends DotLive {
   constructor (run, opts) {
@@ -254,7 +259,7 @@ class Area extends DotObject {
 }
 
 /**
- * World is the containers of all things.
+ * World is an Area and is the root container of all things.
  */
 class World extends Area {
   constructor (run, w, h) {
@@ -297,6 +302,7 @@ class Programmable extends DotObject {
     cmd.app = lang.parse(cmd.src)
     return this.machine.enqueue(cmd)
   }
+  // tick will tick the enclosed machine and execute it
   tick () {
     this.machine.tick()
     this.execute()
@@ -311,6 +317,7 @@ class Programmable extends DotObject {
     }
     this._results = this._results.concat(res)
   }
+  // results will take ownership all queued up results
   results () {
     let r = this._results
     this._results = []
@@ -319,8 +326,9 @@ class Programmable extends DotObject {
 }
 
 /**
- * SocketComposite can have other programmable things (Components) inserted
- * into them.
+ * BROKEN? SocketComposite can have other programmable things (SocketComponents) inserted
+ * into them. Sockets are fairly complicated to deal with, with is why SimpleComposite
+ * also exists.
  */
 class SocketComposite extends Programmable {
   constructor (run, opts) {
@@ -429,7 +437,7 @@ class SocketComposite extends Programmable {
 }
 
 /**
- * SocketComponents have sockets so they can be inserted into a SocketComposite thing.
+ * BROKEN? SocketComponents have sockets so they can be inserted into a SocketComposite.
  */
 class SocketComponent extends Programmable {
   constructor (run) {
@@ -458,7 +466,8 @@ class SocketComponent extends Programmable {
 
 /**
  * SimpleComposites can have lightweight components inserted, which are
- * directly controlled from the owners Machine.
+ * directly controlled from the owners Machine. This is achieved by letting
+ * the components install words into their parent composite.
  */
 class SimpleComposite extends Programmable {
   constructor(run, opts) {
@@ -522,7 +531,7 @@ class SimpleComposite extends Programmable {
 
 /**
  * SimpleComponents are tightly coupled with their parent, and do not have their
- * own Machines.
+ * own Machines. They can have no presence except as part of a SimpleComposite.
  */
 class SimpleComponent extends DotLive {
   constructor (run, opts) {
@@ -547,9 +556,9 @@ class SimpleComponent extends DotLive {
 }
 
 /**
- * ScannerCore is functionality of a scanner, for use in components etc.
+ * RadarCore is functionality of a scanner, for use in components etc.
  */
-class ScannerCore {
+class RadarCore {
   constructor (range = 5) {
     this.range = range
   }
@@ -566,12 +575,12 @@ class ScannerCore {
 }
 
 /**
- * ScannerSocketComponent is a basic scanner as a SocketComponent.
+ * BROKEN? RadarSocketComponent is a basic scanner as a SocketComponent.
  */
-class ScannerSocketComponent extends SocketComponent {
+class RadarSocketComponent extends SocketComponent {
   constructor (run) {
     super(run)
-    this.core = new ScannerCore()
+    this.core = new RadarCore()
     this.scanning = 0
     this.timeToScan = 1
     this.addHardWord('scan', (m, s) => {
@@ -599,9 +608,9 @@ class ScannerSocketComponent extends SocketComponent {
 }
 
 /**
- * ScannerSimpleComponent is a basic scanner as a SimpleComponent.
+ * RadarSimpleComponent is a basic scanner as a SimpleComponent.
  */
-class ScannerSimpleComponent extends SimpleComponent {
+class RadarSimpleComponent extends SimpleComponent {
   constructor(run) {
     super(run, {
       ops: {
@@ -615,14 +624,14 @@ class ScannerSimpleComponent extends SimpleComponent {
         }
       }
     })
-    this.core = new ScannerCore(10)
+    this.core = new RadarCore(10)
     this.actions = new ActionQueue()
     this.timeToScan = 0.1 * this.hz
   }
   _scan (args) {
     let o = this.core.scan(this.owner)
-    this.owner.machine.setVariable("seen", o)
-    this.owner.command({ src: `"seen" load ${args.hook}` })
+    this.owner.machine.setVariable("seen", JSON.stringify(o))
+    this.owner.command({ src: `"seen" load "seen" list-from-json ${args.hook}` })
   }
   tick () {
     this.actions.tick()
@@ -639,7 +648,7 @@ class ArmCore {
 }
 
 /**
- * ArmSocketComponent is a basic arm as a SocketComponent.
+ * BROKEN? ArmSocketComponent is a basic arm as a SocketComponent.
  */
 class ArmSocketComponent extends SocketComponent {
   constructor (run) {
@@ -880,7 +889,7 @@ class ArmSimpleComponent extends SimpleComponent {
     let near = this.owner.area.visibleTo(this.owner.piece)
     near.sort((a, b) => a.distance - b.distance)
     for (let e of near) {
-      if (e.distance < 5) {
+      if (e.distance <= 1) {
         // very close things confuse the directions
       } else {
         let diff = Math.abs(e.direction - direction)
@@ -939,9 +948,9 @@ class ArmSimpleComponent extends SimpleComponent {
 }
 
 /**
- * SocketPlayer uses the SocketComposite system.
+ * SocketControlCentre uses the SocketComposite system.
  */
-class SocketPlayer extends SocketComposite {
+class SocketControlCentre extends SocketComposite {
   constructor (run, opts) {
     super(run, opts)
     // default extension points
@@ -950,7 +959,7 @@ class SocketPlayer extends SocketComposite {
     this.addSlot('eye')
     // some default components
     this.accept(new ArmSocketComponent(this.run), { slot: 'arm-1' })
-    this.accept(new ScannerSocketComponent(this.run), { slot: 'eye' })
+    this.accept(new RadarSocketComponent(this.run), { slot: 'eye' })
     // hardwords
     this.addHardWord('state', (m, s) => {
       s.push({
@@ -1014,9 +1023,9 @@ class SocketPlayer extends SocketComposite {
 }
 
 /**
- * SimplePlayer uses the SimpleComposite system.
+ * SimpleControlCentre uses the SimpleComposite system.
  */
-class SimplePlayer extends SimpleComposite {
+class SimpleControlCentre extends SimpleComposite {
   constructor (run, opts) {
     super(run, opts)
     // default extension points
@@ -1026,7 +1035,7 @@ class SimplePlayer extends SimpleComposite {
     // events for sending back out of the game
     this.events = []
     // some default components
-    this.install('eye', new ScannerSimpleComponent(this.run))
+    this.install('eye', new RadarSimpleComponent(this.run))
     this.install('arm-1', new ArmSimpleComponent(this.run))
     // hardwords
     this.addHardWord('state', (m, s) => {
@@ -1044,18 +1053,30 @@ class SimplePlayer extends SimpleComposite {
       })
     })
     // some default words
-    this.compileWord('look', '"on-scan" eye-scan ;')
-    this.compileWord('on-scan', 'to-json "seen" return "look" queue ;')
+    this.compileWord('rot', 'dup 1 - 0 loop dup pull-up swap ; drop ;')
+    // this.compileWord('list-n', 'dup 1 + pull-up swap dup 1 + swap 0 loop dup pull-up 2 pull-up swap list-down swap 1 - ; drop ;')
+    this.compileWord('list-n', '')
+    this.compileWord('list-each', '1 pull-up load2 1 pull-up drop list-each-inner drop drop')
+    this.compileWord('list-each-inner', 'dup 0 != if load2 2 pull-up dup 3 pull-up 1 pull-up call 1 pull-up list-each-inner ;')
+
+    this.compileWord('make-list', '"t" list-new 2 "t" list-push 1 "t" list-push')
+    this.compileWord('test', ':cb "x" return ; make-list "t" "cb" list-each')
+
+    this.compileWord('look-loop-1', '"look-loop-1" eye-scan ;')
+    this.compileWord('look-loop-2', 'list swap "self" 0 0 10 10 5 pull-up 6 list-n to-json "seen" return "look-loop-1" queue ;')
     this.compileWord('grab', '"on-grab" arm-1-grab ;')
     this.compileWord('on-grab', 'arm-1-holding "grabbed" return ;')
     this.compileWord('program', '`"explore" in-a-second` "on-program" arm-1-tell ;')
     this.compileWord('on-program', '"done" "programmed" return release ;')
     this.compileWord('release', '"on-release" arm-1-release ;')
     this.compileWord('on-release', '"done" "released" return ;')
-    this.compileWord('read', '"seen" "on-read" arm-1-read')
-    this.compileWord('on-read', 'to-json "seen" return ;')
+    this.compileWord('read', '"seen" "on-read" arm-1-read ;')
+    // this.compileWord('on-read', 'list swap "r1" 0 15 5 10 5 pull-up 6 list-n to-json "seen" return ;')
 
-    this.compileWord('idle', 'look "idle" delete ;')
+    this.compileWord('setup-mapping', '"map-data" list-new ;')
+    this.compileWord('setup-scanning', '"look-loop-1" queue  ;')
+
+    this.compileWord('idle', 'setup-mapping setup-scanning "idle" delete ;')
   }
   tick () {
     super.tick()
@@ -1067,16 +1088,16 @@ class SimplePlayer extends SimpleComposite {
 }
 
 /**
- * Player is an object that has a special link to the game's control system.
+ * ControlCentre is an object that has a special link to the game's control system.
  */
-class Player extends SimplePlayer {
+class ControlCentre extends SimpleControlCentre {
   constructor (run) {
     super(run, { colour: 'pink', size: 'medium' })
     // events for sending back out of the game
     this.events = []
     // some default words
     this.compileWord('sample', '1 2 + ;')
-    this.compileWord('help', '"try typing list-programs" ;"')
+    this.compileWord('help', '"try typing list-words" ;"')
     this.compileWord('get-state', 'state "state" return "ok" ;')
     this.compileWord('set-idle', '"idle" compile ;')
     this.compileWord('degrees', '90 - 180 / pi * ;')
@@ -1125,7 +1146,7 @@ class Robot1 extends Programmable {
     this.power = { d: 0, p: 0 }
     this.actions = new ActionQueue(1)
     // hardwired components
-    this.scanner = new ScannerCore()
+    this.scanner = new RadarCore()
     // ops
     this.addHardWord('in-a-second', (m, s) => {
       let args = popArgs(s, ['hook'])
@@ -1200,6 +1221,9 @@ class Robot1 extends Programmable {
   }
 }
 
+/**
+ * Box is just something that might be lying around in the world.
+ */
 class Box extends DotObject {
   constructor (run, opts) {
     super(run, opts)
@@ -1217,10 +1241,10 @@ class Run {
     this.hz = hz
     this.n = 0
     this.world = new World(this, 1000, 1000)
-    this.player = new Player(this)
+    this.player = new ControlCentre(this)
     this.player.place(this.world, { x: 500, y: 500 })
     this.addRandomRobot({ x: 502, y: 505 })
-    // this.addRandomRobot({ x: 1, y: 1 })
+    this.addRandomRobot({ x: 498, y: 500 })
     // this.addRandomRobot({ x: 8, y: 22 })
     // this.addRandomRobot({ x: 80, y: 90 })
     this.addSomeThings()
