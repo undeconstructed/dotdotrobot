@@ -30,18 +30,53 @@ class DebugUI {
 
 let debugUI = new DebugUI()
 
-// the OS and everything comes now
+// the installed apps come now
 
 class StatusCmd {
   main (os) {
-    os.write(1, 'no good')
+    os.write(1, 'not good')
     os.exit()
+  }
+}
+
+class CatCmd {
+  main (os) {
+    this.os = os
+    this.os.read(0, 'in')
+  }
+  wake (tag, data) {
+    if (tag === 'in') {
+      if (data === '') {
+        this.os.exit()
+      } else {
+        this.os.write(1, data)
+        this.os.read(0, 'in')
+      }
+    }
   }
 }
 
 class Shell {
   constructor () {
     this.prompt = '$ '
+    this.commands = {
+      'exit': () => {
+        this.os.exit()
+      },
+      'debug': () => {
+        console.log(this)
+        this.addLine('test ' + this)
+      },
+      'handles': () => {
+        this.addLine(this.os.getHandles())
+      },
+      'self': () => {
+        this.addLine(this.os.getSelf())
+      },
+      'time': () => {
+        this.addLine(this.os.getTime())
+      }
+    }
   }
   main (os) {
     this.os = os
@@ -65,9 +100,9 @@ class Shell {
       if (e.key === 'Enter') {
         let i = this.inputBox.value
         this.inputBox.value = ''
-        if (i) {
-          this.onInput(i)
-        }
+        // this wouldn't be allowed, because it's trying to make os calls from an event handler
+        // this.onInput(i)
+        this.os.defer(() => this.onInput(i))
         this.inputBox.focus()
       }
     })
@@ -75,43 +110,60 @@ class Shell {
     this.scroller.appendChild(this.inputLine)
     this.window.setBody(this.scroller)
   }
+  setPrompt (prompt) {
+    this.prompt = prompt
+    this.promptBox.textContent = this.prompt
+  }
   onInput (i) {
     if (this.proc) {
+      this.addLine(i)
       // forward to the running app
       this.os.write(this.proc.in, i)
     } else {
       // try to launch an app
-      this.addLine(i)
+      this.addLine(this.prompt + i)
       this.run(i)
     }
   }
   run (i) {
-    this.proc = this.os.launch(i)
-    this.addLine('launched ', this.proc)
-    if (this.proc) {
-      this.prompt0 = this.prompt
-      this.prompt = ''
-      this.os.read(this.proc.out, 'fromapp')
+    let cmd = this.commands[i]
+    if (cmd) {
+      cmd()
+    } else {
+      this.proc = this.os.launch(i)
+      if (this.proc) {
+        this.prompt0 = this.prompt
+        this.setPrompt('')
+        this.addLine('> launched ' + this.proc.id)
+        this.os.read(this.proc.out, 'fromapp')
+      } else {
+        this.addLine('unknown')
+      }
     }
   }
   wake (tag, data) {
     if (tag === 'fromapp') {
-      this.onOutput(data)
-      this.os.read(this.proc.out, 'fromapp')
-    } else if (tag === 'exit') {
-      this.onExit()
+      if (data === 0) {
+        this.onExit()
+      } else {
+        this.onOutput(data)
+        this.os.read(this.proc.out, 'fromapp')
+      }
     }
   }
   onOutput (e) {
     this.addLine(e)
   }
   onExit () {
+    this.os.close(this.proc.in)
+    this.os.close(this.proc.out)
+    this.addLine('> exited ' + this.proc.id)
     this.proc = null
-    this.prompt = this.prompt0
+    this.setPrompt(this.prompt0)
   }
   addLine (i) {
     let e = document.createElement('li')
-    e.textContent = this.prompt + ' ' + i
+    e.textContent = i
     this.drawnLines.appendChild(e)
   }
 }
@@ -120,8 +172,10 @@ class Hinter {
   constructor () {
     this.lines = [
       'ah nuts, the world\'s been destroyed again. let\'s see what we can put back together.',
-      'okay, plugged the old laptop into the control centre, lets see what can be done',
-      'right, let\'s open a shell and see what\'s working, the status command should work'
+      'and since this is a video game, I guess I\'ve lost my memory too',
+      'and probably this is all notes I wrote to myself in case this exact thing happened',
+      'since I\'m reading this I guess I\'ve plugged in the laptop to the control centre .. yes',
+      'let\'s open a shell and see what\'s working, the status command should work'
     ]
     this.whichLine = 0
   }
@@ -318,10 +372,13 @@ os.addApp('status', StatusCmd)
 os.addApp('story', Hinter)
 os.addApp('radar', Radar)
 os.addApp('shell', Shell)
+os.addApp('cat', CatCmd)
 // icons
-os.addIcon('huh', 'story')
+os.addIcon('huh?', 'story')
 os.addIcon('shell', 'shell')
-os.addIcon('rader', 'radar')
+os.addIcon('radar', 'radar')
+
+window.os = os
 
 // this is just for the pause button
 
