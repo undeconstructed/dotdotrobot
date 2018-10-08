@@ -129,16 +129,31 @@ body {
   background-color: red;
 }
 
+.clock {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  min-width: 100px;
+  border: 1px solid gray;
+  text-align: right;
+}
+
 .icon {
-   -moz-user-select: none;
-   -khtml-user-select: none;
-   -webkit-user-select: none;
-   -ms-user-select: none;
-   user-select: none;
-   user-select: none; position: absolute; left: 10px;
-  width: 50px; height: 50px; background-color: gray;
+  position: absolute;
+  left: 10px;
+  width: 50px;
+  height: 50px;
+  background-color: gray;
   text-align: center;
   border-radius: 5px;
+}
+
+.os {
+  -moz-user-select: none;
+  -khtml-user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
 }
 
 .window {
@@ -151,11 +166,22 @@ body {
   padding: 4px;
 }
 .window .title {
+  cursor: default;
   flex-grow: 0;
+  display: flex;
+  flex-direction: row;
   border-radius: 5px;
   padding: 4px;
   background-color: lightgray;
   font-weight: bold;
+}
+.window .title :first-child {
+  flex-grow: 1;
+}
+.window .title .buttons {
+}
+.window .title .buttons > div {
+  cursor: pointer;
 }
 .window .body {
   flex-grow: 1;

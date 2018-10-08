@@ -60,3 +60,12 @@ export function popArgs(s, names) {
   }
   return out
 }
+
+// dumping ground
+
+const mapper = (k, v) => (v instanceof Set || v instanceof Map ? Array.from(v) : v)
+
+function timeF(d) {
+  let [h, m, s] = [d.getHours(), d.getMinutes(), d.getSeconds()]
+  return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`
+}

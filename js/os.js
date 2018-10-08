@@ -1,6 +1,24 @@
 
+import runner from './runner.js'
+import * as lang from './lang.js'
+
 const STDIN = 0
 const STDOUT = 1
+
+function mkel(tag, opts) {
+  opts = opts || {}
+  let e = document.createElement(tag)
+  if (opts.classes) {
+    e.classList.add(...opts.classes)
+  }
+  if (opts.style) {
+    e.style = style
+  }
+  if (opts.text) {
+    e.textContent = opts.text
+  }
+  return e
+}
 
 // XXX process and stream really aren't classes, they aren't allowed to do anything without the kernel's consent
 
@@ -11,11 +29,15 @@ class Kernel {
     this.icons = 0
     this.apps = {}
     this.streams = new Map()
-    this.streamCounter = 0
+    this.streamCounter = this.streams.size
     this.processes = new Map()
     this.processCounter = 0
     this.windows = new Set()
     this.windowCounter = 0
+    this.topWindow = null
+    // dodgy magic
+    this.magics = new Map()
+    this.magicCounter = 0
     // html stuff for desktop
     this.element.addEventListener('mousemove', (e) => {
       if (this.moving) {
@@ -28,8 +50,8 @@ class Kernel {
       }
     })
     // clock
-    this.timeBox = document.createElement('div')
-    this.timeBox.style = 'position: absolute; bottom: 10px; right: 10px;'
+    this.timeBox = mkel('div')
+    this.timeBox.classList.add('clock')
     this.element.appendChild(this.timeBox)
   }
   addApp (cmd, app) {
@@ -37,10 +59,8 @@ class Kernel {
   }
   addIcon (label, cmd) {
     let n = this.icons++
-    let iconBox = document.createElement('div')
-    iconBox.classList.add('icon')
+    let iconBox = mkel('div', { classes: [ 'os', 'icon' ], text: label })
     iconBox.style = `top: ${10 * (n + 1) + 50 * n}px;`
-    iconBox.textContent = label
     this.element.appendChild(iconBox)
     iconBox.addEventListener('dblclick', (e) => {
       e.preventDefault()
@@ -74,24 +94,30 @@ class Kernel {
   newWindow (proc, clazz, title) {
     let win = new OSWindow(proc, clazz, title)
     this.windows.add(win)
-    this.element.appendChild(win.box0)
-    win.box0.addEventListener('mousedown', (e) => {
-      if (e.target === win.title0) {
-        e.preventDefault()
-        this.startMove(e, win)
+    this.element.appendChild(win.box)
+    win.box.addEventListener('mousedown', (e) => {
+      if (win != this.topWindow) {
+        win.box.style.zIndex = this.topWindow.box.style.zIndex + 1
+        this.topWindow = win
       }
+    })
+    win.titleBar.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      this.startMove(e, win)
     }, { capture: false })
+    win.box.style.zIndex = (this.topWindow ? this.topWindow.box.style.zIndex + 1 : 1)
+    this.topWindow = win
     return win
   }
   closeWindow (proc, win) {
     this.windows.delete(win)
-    this.element.removeChild(win.box0)
+    this.element.removeChild(win.box)
   }
   startMove (e, w) {
     this.moving = { x: e.clientX, y: e.clientY, w: w }
   }
   doMove (e) {
-    let b = this.moving.w.box0
+    let b = this.moving.w.box
     let dx = e.clientX - this.moving.x
     let dy = e.clientY - this.moving.y
     this.moving.w.moveTo(b.offsetLeft + dx, b.offsetTop + dy)
@@ -101,15 +127,16 @@ class Kernel {
   stopMove (e) {
     this.moving = null
   }
+  open (proc, url) {
+    let stream = this.newStream(proc)
+    // TODO
+    return stream
+  }
   exit (proc) {
     proc.running = false
     if (proc.id) {
       for (let stream of proc.handles.values()) {
         stream.unlink(proc)
-        if (stream.owner = proc) {
-          stream.close()
-          stream.owner = null
-        }
       }
       for (let win of proc.windows.values()) {
         this.closeWindow(proc, win)
@@ -118,8 +145,8 @@ class Kernel {
       proc.id = 0
     }
   }
-  crash (proc) {
-    console.log('crashing', proc.id)
+  crash (proc, e) {
+    console.log('crashing', proc.id, e)
     this.exit(proc)
   }
   newStream (proc) {
@@ -128,34 +155,62 @@ class Kernel {
     this.streams.set(id, stream)
     return stream
   }
+  magic (proc, data, tag) {
+    let id = ++this.magicCounter
+    runner.command({
+      id: id,
+      src: data
+    })
+    if (tag) {
+      this.magics.set(id, {
+        proc: proc,
+        tag: tag
+      })
+    }
+    return id
+  }
   tick (state) {
     this.time = state.n
     this.timeBox.textContent = Math.floor(this.time / 10)
 
+    for (let e of state.events) {
+      if (e.typ === 'res') {
+        let m = this.magics.get(e.id)
+        if (m) {
+          this.defer(() => {
+            m.proc.wake(m.tag, e.val)
+          })
+          this.magics.delete(e.id)
+        }
+      } else {
+        console.log('lost event', e)
+      }
+    }
+
     // XXX - OS work shouldn't be tied to animation tick
 
     // TODO - write to/from network streams
-
-    for (let s of this.streams.values()) {
-      if (s.procs.size == 0) {
-        this.streams.delete(s.id)
+  }
+  pump (stream) {
+    if (stream.reader) {
+      if (stream.lines.length > 0) {
+        let l = stream.lines.pop()
+        let r = stream.reader
+        stream.reader = null
+        this.defer(() => {
+          r.proc.wake(r.tag, l)
+        })
+      } else if (!stream.open) {
+        let r = stream.reader
+        stream.reader = null
+        this.defer(() => {
+          r.proc.wake(r.tag, 0)
+        })
       }
-      if (s.reader) {
-        if (s.lines.length > 0) {
-          let l = s.lines.pop()
-          let r = s.reader
-          s.reader = null
-          this.defer(() => {
-            r.proc.wake(r.tag, l)
-          })
-        } else if (!s.open) {
-          let r = s.reader
-          s.reader = null
-          this.defer(() => {
-            r.proc.wake(r.tag, 0)
-          })
-        }
-      }
+    }
+    if (stream.procs.size == 0) {
+      stream.open = false
+      this.streams.delete(stream.id)
     }
   }
   defer (task) {
@@ -178,24 +233,26 @@ class Stream {
       throw new Error('stream closed')
     }
     this.procs.add(proc)
+    this.os.pump(this)
   }
   unlink (proc) {
     this.procs.delete(proc)
-    if (this.procs.size == 0) {
+    if (this.owner = proc) {
       this.open = false
+      this.owner = null
     }
+    this.os.pump(this)
   }
   write (i) {
     if (!this.open) {
       throw new Error('stream closed')
     }
     this.lines.push(i)
+    this.os.pump(this)
   }
   read (proc, tag) {
     this.reader = { proc, tag }
-  }
-  close () {
-    this.open = false
+    this.os.pump(this)
   }
 }
 
@@ -210,7 +267,8 @@ class Process {
     this.handles.set(STDIN, os.newStream(this))
     this.handles.set(STDOUT, os.newStream(this))
     this.handleCounter = this.handles.size
-    this.windows = new Set()
+    this.windows = new Map()
+    this.windowCounter = 0
   }
   addStream (stream) {
     stream.link(this)
@@ -218,15 +276,38 @@ class Process {
     this.handles.set(id, stream)
     return id
   }
-  newWindow(clazz, title) {
+  newWindow(clazz, title, body) {
     let win = this.os.newWindow(this, clazz, title)
-    this.windows.add(win)
-    // XXX - this exposes OS internals
-    return win
+    let id = ++this.windowCounter
+    win.localId = id
+    this.windows.set(id, win)
+    win.setBody(body)
+    return id
   }
-  closeWindow(win) {
+  moveWindow (id, x, y) {
+    let win = this.windows.get(id)
+    if (!win) {
+      this.os.crash(this)
+      throw new Error('no window ' + handle)
+    }
+    win.moveTo(x, y)
+  }
+  resizeWindow (id, w, h) {
+    let win = this.windows.get(id)
+    if (!win) {
+      this.os.crash(this)
+      throw new Error('no window ' + handle)
+    }
+    win.resize(w, h)
+  }
+  closeWindow (id) {
+    let win = this.windows.get(id)
+    if (!win) {
+      this.os.crash(this)
+      throw new Error('no window ' + handle)
+    }
     this.os.closeWindow(this, win)
-    this.windows.delete(win)
+    this.windows.delete(id)
   }
   getTime () {
     return this.os.time
@@ -279,10 +360,13 @@ class Process {
   launch (cmd) {
     return this.os.launch(cmd, this)
   }
+  onWindowClose (win) {
+    this.wake('window_close', win.localId)
+  }
   defer (f) {
     this.os.defer((e) => {
       if (!this.running) {
-        throw new 'notrunning'
+        throw 'notrunning'
       }
       this.inside++
       try {
@@ -291,17 +375,23 @@ class Process {
         if (e === 'exit') {
           this.os.exit(this)
         } else {
-          this.os.crash(this)
+          this.os.crash(this, e)
         }
       }
       this.inside--
     })
+  }
+  // this is the a syscall to access the other world
+  magic (data, tag) {
+    return this.os.magic(this, data, tag)
   }
   run () {
     let x = this
 
     const allowed = new Set([
       "newWindow",
+      "moveWindow",
+      "resizeWindow",
       "closeWindow",
       "getTime",
       "getSelf",
@@ -312,7 +402,8 @@ class Process {
       "close",
       "exit",
       "launch",
-      "defer"
+      "defer",
+      "magic"
     ])
 
     const handler = {
@@ -325,7 +416,7 @@ class Process {
           return (...args) => x.defer(...args)
         }
         return (...args) => {
-          console.log('syscall', x.id, prop)
+          console.log('syscall', x.id, prop, args)
           if (x.inside < 1) {
             throw 'notinside'
           }
@@ -344,39 +435,44 @@ class Process {
 }
 
 class OSWindow {
-  constructor (os, clazz, title) {
-    this.os = os
+  constructor (proc, clazz, title) {
+    this.proc = proc
 
-    this.box0 = document.createElement('div')
-    this.box0.classList.add('window')
-    this.title0 = document.createElement('div')
-    this.title0.classList.add('title')
-    this.title0.textContent = title
-    this.box0.appendChild(this.title0)
-    this.body0 = document.createElement('div')
-    this.body0.classList.add('body')
-    this.body0.classList.add(clazz)
-    this.box0.appendChild(this.body0)
-    this.body1 = null
+    this.box = mkel('div', { classes: ['window'] })
+
+    this.titleBar = mkel('div', { classes: [ 'os', 'title' ] })
+    this.titleBox = mkel('div', { text: title })
+    this.titleBar.appendChild(this.titleBox)
+    let buttonBox = mkel('div', { classes: [ 'buttons' ] })
+    let closeButton = mkel('div', { text: 'X' })
+    closeButton.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.proc.onWindowClose(this)
+    })
+    buttonBox.appendChild(closeButton)
+    this.titleBar.appendChild(buttonBox)
+    this.box.appendChild(this.titleBar)
+
+    this.bodyBox = mkel('div', { classes: [ 'body', clazz ] })
+    this.box.appendChild(this.bodyBox)
+
+    this.body = null
   }
   moveTo (x, y) {
-    this.box0.style.left = `${x}px`
-    this.box0.style.top =`${y}px`
+    this.box.style.left = `${x}px`
+    this.box.style.top =`${y}px`
   }
   resize (w, h) {
-    this.box0.style.width = `${w}px`
-    this.box0.style.height = `${h}px`
+    this.box.style.width = `${w}px`
+    this.box.style.height = `${h}px`
   }
   setBody (element) {
-    if (this.body1) {
-      this.body0.replaceChild(element, this.body1)
+    if (this.body) {
+      this.bodyBox.replaceChild(element, this.body)
     } else {
-      this.body0.appendChild(element)
+      this.bodyBox.appendChild(element)
     }
-    this.body1 = element
-  }
-  close () {
-    this.os.closeWindow(this)
+    this.body = element
   }
 }
 

@@ -3,32 +3,15 @@ import runner from './runner.js'
 import * as lang from './lang.js'
 import OS from './os.js'
 
-// for running code in the browser
-window.lang = function (src) {
-  return lang.run(lang.parse(src)).s
-}
-
 // some debuggy stuff
 
-const mapper = (k, v) => (v instanceof Set || v instanceof Map ? Array.from(v) : v)
+let dbg_box = document.createElement('div')
+dbg_box.className = 'debugui'
+document.body.appendChild(dbg_box)
 
-function timeF(d) {
-  let [h, m, s] = [d.getHours(), d.getMinutes(), d.getSeconds()]
-  return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`
+function update_debug (s) {
+  dbg_box.textContent = `n = ${s.n}`
 }
-
-class DebugUI {
-  constructor () {
-    this.box = document.createElement('div')
-    this.box.className = 'debugui'
-    document.body.appendChild(this.box)
-  }
-  update (s) {
-    this.box.textContent = `n = ${s.n}`
-  }
-}
-
-let debugUI = new DebugUI()
 
 // the installed apps come now
 
@@ -56,6 +39,58 @@ class CatCmd {
   }
 }
 
+class ForthCmd {
+  main (os) {
+    this.os = os
+    this.os.read(0, 'in')
+  }
+  wake (tag, data) {
+    if (tag === 'in') {
+      if (data === '') {
+        this.os.exit()
+      } else {
+        let res = this.run(data)
+        this.os.write(1, res)
+        this.os.read(0, 'in')
+      }
+    }
+  }
+  run (src) {
+    try {
+      return '' + lang.run(lang.parse(src)).res
+    } catch (e) {
+      return '' + e
+    }
+  }
+}
+
+class MagicCmd {
+  main (os) {
+    this.os = os
+    this.os.read(0, 'in')
+  }
+  wake (tag, data) {
+    if (tag === 'in') {
+      if (data === '') {
+        this.os.exit()
+      } else {
+        this.os.magic(data, 'res')
+      }
+    } else if (tag === 'res') {
+      this.os.write(1, data)
+      this.os.read(0, 'in')
+    }
+  }
+}
+
+class RemoteMagicCmd {
+  main (os) {
+    this.os = os
+    this.os.write(1, 'not ready')
+    this.os.exit()
+  }
+}
+
 class Shell {
   constructor () {
     this.prompt = '$ '
@@ -80,9 +115,6 @@ class Shell {
   }
   main (os) {
     this.os = os
-    this.window = os.newWindow('console', 'shell')
-    this.window.moveTo(50, 50)
-    this.window.resize(600, 400)
     this.scroller = document.createElement('div')
     this.scroller.classList.add('scroller')
     this.scroller.addEventListener('click', (e) => {
@@ -108,7 +140,9 @@ class Shell {
     })
     this.inputLine.appendChild(this.inputBox)
     this.scroller.appendChild(this.inputLine)
-    this.window.setBody(this.scroller)
+    this.window = os.newWindow('console', 'shell', this.scroller)
+    this.os.moveWindow(this.window, 50, 50)
+    this.os.resizeWindow(this.window, 600, 400)
   }
   setPrompt (prompt) {
     this.prompt = prompt
@@ -149,6 +183,8 @@ class Shell {
         this.onOutput(data)
         this.os.read(this.proc.out, 'fromapp')
       }
+    } else if (tag === 'window_close') {
+      this.os.exit()
     }
   }
   onOutput (e) {
@@ -171,17 +207,16 @@ class Shell {
 class Hinter {
   constructor () {
     this.lines = [
-      'ah nuts, the world\'s been destroyed again. let\'s see what we can put back together.',
-      'and since this is a video game, I guess I\'ve lost my memory too',
-      'and probably this is all notes I wrote to myself in case this exact thing happened',
-      'since I\'m reading this I guess I\'ve plugged in the laptop to the control centre .. yes',
+      'good news! the world has blown up or something, but you can put it back together',
+      'that\'s why you\'ve been locked in this box, with just this computer to talk to',
+      'the computer is part of a control centre, which hopefully can help fix things',
+      'but you might need to learn quite a lot of things to get there...',
       'let\'s open a shell and see what\'s working, the status command should work'
     ]
     this.whichLine = 0
   }
   main (os) {
     this.os = os
-    this.window = os.newWindow('hinter', 'story')
     this.view = document.createElement('div')
     this.line = document.createElement('p')
     this.line.textContent = this.lines[this.whichLine]
@@ -195,17 +230,22 @@ class Hinter {
       }
     })
     this.view.appendChild(nextButton)
-    this.window.setBody(this.view)
-    this.window.moveTo(100, 100)
+    this.window = os.newWindow('hinter', 'story', this.view)
+    this.os.moveWindow(this.window, 100, 100)
+    this.os.resizeWindow(this.window, 400, 200)
   }
-  wake () {}
+  wake (tag, data) {
+    if (tag === 'window_close') {
+      this.os.exit()
+    }
+  }
 }
 
 class StateViewer {
   main (os) {
     this.os = os
-    this.window = os.newWindow('viewer', 'state')
     this.text = document.createElement('div')
+    this.window = os.newWindow('viewer', 'state', this.text)
   }
   update (e) {
     this.text.textContent = JSON.stringify(e.val, mapper, '  ')
@@ -222,17 +262,17 @@ class Radar {
   }
   main (os) {
     this.os = os
-    this.window = os.newWindow('hinter', 'radar')
     this.canvas = document.createElement('canvas')
     this.canvas.width = this.w
     this.canvas.height = this.h
-    // this.canvas.style = 'height: 100%; width: 100%;'
-    this.window.setBody(this.canvas)
     this.canvas.addEventListener('mousemove', e => {
       let [sx, sy] = [this.box.scrollLeft, this.box.scrollTop]
       let [cx, cy] = [e.x - this.canvas.offsetLeft + sx, e.y - this.canvas.offsetTop + sy]
       this.mouse = { x: cx, y: cy }
     })
+    this.window = os.newWindow('radar', 'radar', this.canvas)
+    this.os.moveWindow(this.window, 100, 100)
+    this.os.resizeWindow(this.window, 400, 400)
     this.draw()
   }
   centre () {
@@ -366,6 +406,17 @@ class Radar {
   }
 }
 
+class Manual {
+  main (os) {
+    this.os = os
+    this.text = document.createElement('div')
+    this.text.textContent = 'manual'
+    this.window = os.newWindow('manual', 'manual', this.text)
+    this.os.moveWindow(this.window, 100, 100)
+    this.os.resizeWindow(this.window, 400, 400)
+  }
+}
+
 let os = new OS(document.getElementById('main'))
 // apps
 os.addApp('status', StatusCmd)
@@ -373,27 +424,40 @@ os.addApp('story', Hinter)
 os.addApp('radar', Radar)
 os.addApp('shell', Shell)
 os.addApp('cat', CatCmd)
+os.addApp('forth', ForthCmd)
+os.addApp('magic', MagicCmd)
+os.addApp('rmagic', RemoteMagicCmd)
+os.addApp('manual', Manual)
 // icons
 os.addIcon('huh?', 'story')
+os.addIcon('manual', 'manual')
 os.addIcon('shell', 'shell')
 os.addIcon('radar', 'radar')
 
+os.launch('story')
+
+// put some things in the window for hacking around
+
 window.os = os
+window.lang = lang
+window.forth = function (src) {
+  return lang.run(lang.parse(src)).res
+}
 
 // this is just for the pause button
 
-window.addEventListener('keypress', e => {
-  if (e.key === ' ') {
-    let paused = runner.pause()
-    debugUI.box.classList.toggle('paused', paused)
-  }
-})
+// window.addEventListener('keypress', e => {
+//   if (e.key === ' ') {
+//     let paused = runner.pause()
+//     dbg_box.classList.toggle('paused', paused)
+//   }
+// })
 
 // this connects the OS to the simulation
 
 let read = function() {
   let s = runner.read()
-  debugUI.update(s)
+  // update_debug(s)
   os.tick(s)
   window.requestAnimationFrame(read)
 }

@@ -13,6 +13,10 @@ class Memory {
     this.m = new Map()
     this.cells = 0
   }
+  // for cheating in list-words
+  entries () {
+    return this.m.entries()
+  }
   // allocates a temporary memory cell
   alloc (k) {
     k = k || this.cells++

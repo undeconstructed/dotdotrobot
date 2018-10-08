@@ -11,10 +11,14 @@ let paused = false
 
 let tick = function() {
   let toSend = commands.length > 0 ? commands : null
-  let newEvents = game.run.tick(toSend)
-  commands = []
-  if (newEvents.length > 0) {
-    events = events.concat(newEvents)
+  try {
+    let newEvents = game.run.tick(toSend)
+    commands = []
+    if (newEvents.length > 0) {
+      events = events.concat(newEvents)
+    }
+  } catch (e) {
+    console.log('simulation error', e)
   }
   timeout = window.setTimeout(tick, 1000 / hz)
 }

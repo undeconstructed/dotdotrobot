@@ -1241,8 +1241,8 @@ class Run {
     this.hz = hz
     this.n = 0
     this.world = new World(this, 1000, 1000)
-    this.player = new ControlCentre(this)
-    this.player.place(this.world, { x: 500, y: 500 })
+    this.cc = new ControlCentre(this)
+    this.cc.place(this.world, { x: 500, y: 500 })
     this.addRandomRobot({ x: 502, y: 505 })
     this.addRandomRobot({ x: 498, y: 500 })
     // this.addRandomRobot({ x: 8, y: 22 })
@@ -1253,17 +1253,17 @@ class Run {
     new Robot1(this, random.name(), random.colour()).place(this.world, opts)
   }
   addSomeThings () {
-    new Box(this).place(this.world, { x: 503, y: 400})
-    new Box(this).place(this.world, { x: 503, y: 484})
+    new Box(this).place(this.world, { x: 503, y: 400 })
+    new Box(this).place(this.world, { x: 503, y: 484 })
   }
   accept () {
     return false
   }
   tick (commands) {
     this.n++
-    this.player.startTick(commands)
+    this.cc.startTick(commands)
     this.world.tick()
-    let events = this.player.endTick()
+    let events = this.cc.endTick()
     for (let e of events) {
       e.n = this.n
     }
