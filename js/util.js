@@ -61,6 +61,24 @@ export function popArgs(s, names) {
   return out
 }
 
+// frontend
+
+export function mkel(tag, opts) {
+  opts = opts || {}
+  let e = document.createElement(tag)
+  if (opts.classes) {
+    e.classList.add(...opts.classes)
+  }
+  if (opts.style) {
+    e.style = style
+  }
+  if (opts.text) {
+    e.textContent = opts.text
+  }
+  return e
+}
+
+
 // dumping ground
 
 const mapper = (k, v) => (v instanceof Set || v instanceof Map ? Array.from(v) : v)

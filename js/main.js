@@ -1,11 +1,12 @@
 
 import runner from './runner.js'
+import { mkel } from './util.js'
 import * as lang from './lang.js'
 import OS from './os.js'
 
 // some debuggy stuff
 
-let dbg_box = document.createElement('div')
+let dbg_box = mkel('div')
 dbg_box.className = 'debugui'
 document.body.appendChild(dbg_box)
 
@@ -16,15 +17,14 @@ function update_debug (s) {
 // the installed apps come now
 
 class StatusCmd {
-  main (os) {
-    os.write(1, 'not good')
-    os.exit()
+  main () {
+    this.os.write(1, 'not good')
+    this.os.exit()
   }
 }
 
 class CatCmd {
-  main (os) {
-    this.os = os
+  main () {
     this.os.read(0, 'in')
   }
   wake (tag, data) {
@@ -40,8 +40,7 @@ class CatCmd {
 }
 
 class ForthCmd {
-  main (os) {
-    this.os = os
+  main () {
     this.os.read(0, 'in')
   }
   wake (tag, data) {
@@ -65,8 +64,7 @@ class ForthCmd {
 }
 
 class MagicCmd {
-  main (os) {
-    this.os = os
+  main () {
     this.os.read(0, 'in')
   }
   wake (tag, data) {
@@ -84,10 +82,23 @@ class MagicCmd {
 }
 
 class RemoteMagicCmd {
-  main (os) {
-    this.os = os
-    this.os.write(1, 'not ready')
-    this.os.exit()
+  main () {
+    let freq = this.args[1]
+    if (!freq) {
+      this.os.write(1, `usage: ${this.args[0]} <frequency>`)
+      this.os.exit(1)
+    }
+    this.streams = this.os.open([ 'radio', parseInt(freq) ])
+    this.os.read(0, 'in')
+  }
+  wake (tag, data) {
+    if (tag === 'in') {
+      this.os.write(this.streams.tx, data)
+      this.os.read(this.streams.rx, 'res')
+    } else if (tag === 'res') {
+      this.os.write(1, data)
+      this.os.read(0, 'in')
+    }
   }
 }
 
@@ -113,21 +124,17 @@ class Shell {
       }
     }
   }
-  main (os) {
-    this.os = os
-    this.scroller = document.createElement('div')
-    this.scroller.classList.add('scroller')
+  main () {
+    this.scroller = mkel('div', { classes: [ 'scroller' ] })
     this.scroller.addEventListener('click', (e) => {
       this.inputBox.focus()
     })
-    this.drawnLines = document.createElement('ul')
+    this.drawnLines = mkel('ul')
     this.scroller.appendChild(this.drawnLines)
-    this.inputLine = document.createElement('div')
-    this.inputLine.classList.add('inputline')
-    this.promptBox = document.createElement('span')
-    this.promptBox.textContent = this.prompt
+    this.inputLine = mkel('div', { classes: [ 'inputline' ] })
+    this.promptBox = mkel('span', { text: this.prompt })
     this.inputLine.appendChild(this.promptBox)
-    this.inputBox = document.createElement('input')
+    this.inputBox = mkel('input')
     this.inputBox.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
         let i = this.inputBox.value
@@ -140,7 +147,19 @@ class Shell {
     })
     this.inputLine.appendChild(this.inputBox)
     this.scroller.appendChild(this.inputLine)
-    this.window = os.newWindow('console', 'shell', this.scroller)
+
+    this.buttonBox = mkel('div', { classes: [ 'buttons' ] })
+    let killButton = mkel('button', { text: 'kill'} )
+    killButton.addEventListener('click', (e) => {
+      this.os.defer(() => this.onKill())
+    })
+    this.buttonBox.appendChild(killButton)
+
+    let body = mkel('div', { classes: [ 'body' ] })
+    body.appendChild(this.scroller)
+    body.appendChild(this.buttonBox)
+
+    this.window = this.os.newWindow('console', 'shell', body)
     this.os.moveWindow(this.window, 50, 50)
     this.os.resizeWindow(this.window, 600, 400)
   }
@@ -155,16 +174,22 @@ class Shell {
       this.os.write(this.proc.in, i)
     } else {
       // try to launch an app
+      let args = i.trim().split(/\s+/)
       this.addLine(this.prompt + i)
-      this.run(i)
+      this.run(args[0], args)
     }
   }
-  run (i) {
+  onKill () {
+    if (this.proc) {
+      this.os.signal(this.proc.id, 9)
+    }
+  }
+  run (i, args) {
     let cmd = this.commands[i]
     if (cmd) {
-      cmd()
+      cmd(args)
     } else {
-      this.proc = this.os.launch(i)
+      this.proc = this.os.launch(i, args)
       if (this.proc) {
         this.prompt0 = this.prompt
         this.setPrompt('')
@@ -198,7 +223,7 @@ class Shell {
     this.setPrompt(this.prompt0)
   }
   addLine (i) {
-    let e = document.createElement('li')
+    let e = mkel('li')
     e.textContent = i
     this.drawnLines.appendChild(e)
   }
@@ -215,13 +240,12 @@ class Hinter {
     ]
     this.whichLine = 0
   }
-  main (os) {
-    this.os = os
-    this.view = document.createElement('div')
-    this.line = document.createElement('p')
+  main () {
+    this.view = mkel('div')
+    this.line = mkel('p')
     this.line.textContent = this.lines[this.whichLine]
     this.view.appendChild(this.line)
-    let nextButton = document.createElement('button')
+    let nextButton = mkel('button')
     nextButton.textContent = 'more?'
     nextButton.addEventListener('click', (e) => {
       if (this.whichLine < this.lines.length -1 ) {
@@ -230,7 +254,7 @@ class Hinter {
       }
     })
     this.view.appendChild(nextButton)
-    this.window = os.newWindow('hinter', 'story', this.view)
+    this.window = this.os.newWindow('hinter', 'story', this.view)
     this.os.moveWindow(this.window, 100, 100)
     this.os.resizeWindow(this.window, 400, 200)
   }
@@ -242,10 +266,9 @@ class Hinter {
 }
 
 class StateViewer {
-  main (os) {
-    this.os = os
-    this.text = document.createElement('div')
-    this.window = os.newWindow('viewer', 'state', this.text)
+  main () {
+    this.text = mkel('div')
+    this.window = this.os.newWindow('viewer', 'state', this.text)
   }
   update (e) {
     this.text.textContent = JSON.stringify(e.val, mapper, '  ')
@@ -260,19 +283,25 @@ class Radar {
     this.scale = 10
     this.mouse = { x: 0, y: this.h / -2 }
   }
-  main (os) {
-    this.os = os
-    this.canvas = document.createElement('canvas')
+  main () {
+    this.canvas = mkel('canvas')
     this.canvas.width = this.w
     this.canvas.height = this.h
+
+    this.box = mkel('div', { classes: [ 'body' ] })
+    this.box.appendChild(this.canvas)
+
     this.canvas.addEventListener('mousemove', e => {
-      let [sx, sy] = [this.box.scrollLeft, this.box.scrollTop]
-      let [cx, cy] = [e.x - this.canvas.offsetLeft + sx, e.y - this.canvas.offsetTop + sy]
-      this.mouse = { x: cx, y: cy }
+      // let [sx, sy] = [this.box.scrollLeft, this.box.scrollTop]
+      // let [cx, cy] = [e.clientX - this.box.offsetLeft + sx, e.clientY - this.box.offsetTop + sy]
+      // this.mouse = { x: cx, y: cy }
+      this.mouse = { x: e.offsetX, y: e.offsetY }
     })
-    this.window = os.newWindow('radar', 'radar', this.canvas)
+
+    this.window = this.os.newWindow('radar', 'radar', this.box)
     this.os.moveWindow(this.window, 100, 100)
     this.os.resizeWindow(this.window, 400, 400)
+    this.centre()
     this.draw()
   }
   centre () {
@@ -404,14 +433,18 @@ class Radar {
     }
     this.data.set(name, list)
   }
+  wake (tag, data) {
+    if (tag === 'window_close') {
+      this.os.exit()
+    }
+  }
 }
 
 class Manual {
-  main (os) {
-    this.os = os
-    this.text = document.createElement('div')
+  main () {
+    this.text = mkel('div')
     this.text.textContent = 'manual'
-    this.window = os.newWindow('manual', 'manual', this.text)
+    this.window = this.os.newWindow('manual', 'manual', this.text)
     this.os.moveWindow(this.window, 100, 100)
     this.os.resizeWindow(this.window, 400, 400)
   }
@@ -433,8 +466,10 @@ os.addIcon('huh?', 'story')
 os.addIcon('manual', 'manual')
 os.addIcon('shell', 'shell')
 os.addIcon('radar', 'radar')
+os.addIcon('files', 'files')
+os.addIcon('editor', 'editor')
 
-os.launch('story')
+// os.launch('story')
 
 // put some things in the window for hacking around
 

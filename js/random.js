@@ -34,3 +34,7 @@ export function name () {
 export function colour () {
   return pick(colours)
 }
+
+export function int (min, max) {
+  return min + Math.floor(Math.random() * (max - min))
+}

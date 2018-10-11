@@ -173,6 +173,8 @@ class Area extends DotObject {
     this.w = w
     this.h = h
     this.children = new Set()
+    this.airwaves = new Map()
+    this.airwavesNext = new Map()
   }
   place (parent, x, y) {
     return parent.accept(this, { x: x, y: y })
@@ -197,6 +199,9 @@ class Area extends DotObject {
         child.motion = null
       }
     }
+    // transmissions from this tick appear to read in the next
+    this.airwaves = this.airwavesNext
+    this.airwavesNext = new Map()
   }
   accept (child, opts) {
     assert(child instanceof DotObject)
@@ -248,6 +253,21 @@ class Area extends DotObject {
     let m = Math.sqrt(dx**2 + dy**2)
     let b = Math.atan2(dy, dx)
     return [b, m]
+  }
+  tx (frequency, data) {
+    console.log('tx', frequency, data)
+    this.airwavesNext.set(frequency, {
+      done: false,
+      data: data
+    })
+  }
+  rx (frequency) {
+    let x = this.airwaves.get(frequency)
+    if (x) {
+      console.log('rx', frequency, x.data)
+      return x.data
+    }
+    return null
   }
   toString () {
     if (this.children.size > 0) {
@@ -552,6 +572,21 @@ class SimpleComponent extends DotLive {
   }
   toString () {
     return 'simple component'
+  }
+}
+
+/**
+ * RadioCore is functionality of a radio thing, for use in components etc.
+ */
+class RadioCore {
+  constructor (frequency) {
+    this.frequency = frequency
+  }
+  tx (host, data) {
+    host.area.tx(this.frequency + 1, data)
+  }
+  rx (host) {
+    return host.area.rx(this.frequency)
   }
 }
 
@@ -1106,12 +1141,19 @@ class ControlCentre extends SimpleControlCentre {
     this.events = []
     if (commands) {
       for (let c of commands) {
-        if (!this.command(c)) {
-          this.events.push({
-            typ: 'error',
-            val: `command overflow`,
-            cmd: c.id
-          })
+        if (c.src) {
+          // this is something to run in the machine
+          if (!this.command(c)) {
+            this.events.push({
+              typ: 'error',
+              val: `command overflow`,
+              cmd: c.id
+            })
+          }
+        } else if (c.frequency) {
+          // this is going to be transmitted on the radio
+          // XXX - something is odd about how every frequency can be used at once
+          this.area.tx(c.frequency, c.data)
         }
       }
     }
@@ -1137,7 +1179,7 @@ class ControlCentre extends SimpleControlCentre {
  * it.
  */
 class Robot1 extends Programmable {
-  constructor (run, name, colour) {
+  constructor (run, name, colour, frequency) {
     super(run, { colour })
     // internal state
     this.socket0 = this.machine.newSocket()
@@ -1147,6 +1189,7 @@ class Robot1 extends Programmable {
     this.actions = new ActionQueue(1)
     // hardwired components
     this.scanner = new RadarCore()
+    this.radio = new RadioCore(frequency)
     // ops
     this.addHardWord('in-a-second', (m, s) => {
       let args = popArgs(s, ['hook'])
@@ -1201,7 +1244,15 @@ class Robot1 extends Programmable {
     this.command({ src: `"seen" load ${args.hook}` })
   }
   tick () {
-    this.n++
+    // this.n++
+    let radioIn = this.radio.rx(this)
+    if (radioIn) {
+      if (radioIn === 'name') {
+        return this.radio.tx(this, this.name)
+      } else {
+        this.radio.tx(this, '???')
+      }
+    }
     // XXX is this the right place in the sequence ?
     this.actions.tick()
     super.tick()
@@ -1216,8 +1267,11 @@ class Robot1 extends Programmable {
       }
     }
   }
+  get name () {
+    return this.machine.getVariable('name')
+  }
   toString () {
-    return `${this.colour} robot '${this.machine.getVariable('name')}' ` + super.toString()
+    return `${this.colour} robot '${this.name}' ${super.toString()}`
   }
 }
 
@@ -1250,7 +1304,11 @@ class Run {
     this.addSomeThings()
   }
   addRandomRobot (opts) {
-    new Robot1(this, random.name(), random.colour()).place(this.world, opts)
+    let name = random.name()
+    let colour = random.colour()
+    let freq = random.int(0, 1000)
+    console.log('frequency', freq)
+    new Robot1(this, name, colour, freq).place(this.world, opts)
   }
   addSomeThings () {
     new Box(this).place(this.world, { x: 503, y: 400 })
@@ -1266,6 +1324,13 @@ class Run {
     let events = this.cc.endTick()
     for (let e of events) {
       e.n = this.n
+    }
+    // XXX - areas ... ?
+    for (let [k, v] of this.world.airwaves.entries()) {
+      events.push({
+        frequency: k,
+        data: v
+      })
     }
     return events
   }

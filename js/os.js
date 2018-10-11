@@ -1,24 +1,10 @@
 
 import runner from './runner.js'
+import { mkel } from './util.js'
 import * as lang from './lang.js'
 
 const STDIN = 0
 const STDOUT = 1
-
-function mkel(tag, opts) {
-  opts = opts || {}
-  let e = document.createElement(tag)
-  if (opts.classes) {
-    e.classList.add(...opts.classes)
-  }
-  if (opts.style) {
-    e.style = style
-  }
-  if (opts.text) {
-    e.textContent = opts.text
-  }
-  return e
-}
 
 // XXX process and stream really aren't classes, they aren't allowed to do anything without the kernel's consent
 
@@ -38,7 +24,18 @@ class Kernel {
     // dodgy magic
     this.magics = new Map()
     this.magicCounter = 0
-    // html stuff for desktop
+    // topbar
+    this.topBox = mkel('div', { classes: [ 'os', 'topbar' ] })
+    this.timeBox = mkel('div', { classes: [ 'os', 'clock' ] })
+    this.topBox.appendChild(this.timeBox)
+    // dock
+    let dockBox = mkel('div', { classes: [ 'os', 'dockbox' ] })
+    this.dockBox = mkel('div', { classes: [ 'os', 'dock' ] })
+    dockBox.appendChild(this.dockBox)
+    // construct
+    this.element.appendChild(this.topBox)
+    this.element.appendChild(dockBox)
+    // window management
     this.element.addEventListener('mousemove', (e) => {
       if (this.moving) {
         this.doMove(e)
@@ -49,26 +46,23 @@ class Kernel {
         this.stopMove(e)
       }
     })
-    // clock
-    this.timeBox = mkel('div')
-    this.timeBox.classList.add('clock')
-    this.element.appendChild(this.timeBox)
   }
   addApp (cmd, app) {
     this.apps[cmd] = app
   }
   addIcon (label, cmd) {
     let n = this.icons++
-    let iconBox = mkel('div', { classes: [ 'os', 'icon' ], text: label })
-    iconBox.style = `top: ${10 * (n + 1) + 50 * n}px;`
-    this.element.appendChild(iconBox)
-    iconBox.addEventListener('dblclick', (e) => {
+    let iconCore = mkel('div', { text: label })
+    let iconBox = mkel('div', { classes: [ 'os', 'icon' ] })
+    iconBox.appendChild(iconCore)
+    this.dockBox.appendChild(iconBox)
+    iconBox.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
       this.launch(cmd)
     })
   }
-  launch (cmd, parent) {
+  launch (cmd, args, parent) {
     let app = this.apps[cmd]
     let loaded = null
     try {
@@ -77,7 +71,7 @@ class Kernel {
       return null
     }
     let id = ++this.processCounter
-    let proc = new Process(this, id, loaded)
+    let proc = new Process(this, id, loaded, args)
     this.processes.set(id, proc)
     let ret = {
       id: id,
@@ -90,6 +84,16 @@ class Kernel {
     }
     this.defer(() => proc.run())
     return ret
+  }
+  signal (proc, tgt, sig) {
+    let tgtProc = this.processes.get(tgt)
+    if (tgtProc) {
+      if (sig === 9) {
+        this.defer(() => {
+          this.exit(tgtProc)
+        })
+      }
+    }
   }
   newWindow (proc, clazz, title) {
     let win = new OSWindow(proc, clazz, title)
@@ -128,9 +132,16 @@ class Kernel {
     this.moving = null
   }
   open (proc, url) {
-    let stream = this.newStream(proc)
-    // TODO
-    return stream
+    if (url[0] == 'radio') {
+      let tx = this.newStream(proc)
+      let rx = this.newStream(proc)
+      tx.d = 'tx'
+      rx.d = 'rx'
+      tx.freq = url[1]
+      rx.freq = url[1] + 1
+      return { tx, rx }
+    }
+    return null
   }
   exit (proc) {
     proc.running = false
@@ -173,6 +184,8 @@ class Kernel {
     this.time = state.n
     this.timeBox.textContent = Math.floor(this.time / 10)
 
+    // process events of last tick
+    let incoming = new Map()
     for (let e of state.events) {
       if (e.typ === 'res') {
         let m = this.magics.get(e.id)
@@ -182,6 +195,8 @@ class Kernel {
           })
           this.magics.delete(e.id)
         }
+      } else if (e.frequency) {
+        incoming.set(e.frequency, e.data)
       } else {
         console.log('lost event', e)
       }
@@ -189,7 +204,23 @@ class Kernel {
 
     // XXX - OS work shouldn't be tied to animation tick
 
-    // TODO - write to/from network streams
+    // process network streams
+    for (let stream of this.streams.values()) {
+      if (stream.d === 'tx') {
+        let l = stream.lines.pop()
+        if (l) {
+          runner.command({
+            frequency: stream.freq,
+            data: l
+          })
+        }
+      } else if (stream.d === 'rx') {
+        let inl = incoming.get(stream.freq)
+        if (inl) {
+          t.lines.push(inl)
+        }
+      }
+    }
   }
   pump (stream) {
     if (stream.reader) {
@@ -257,10 +288,11 @@ class Stream {
 }
 
 class Process {
-  constructor (os, id, app) {
+  constructor (os, id, app, args) {
     this.os = os
     this.id = id
     this.app = app
+    app.args = args
     this.running = false
     this.inside = 0
     this.handles = new Map()
@@ -320,9 +352,11 @@ class Process {
     return ids
   }
   open (url) {
-    let stream = this.os.open(this, url)
-    if (stream) {
-      return this.addStream(stream)
+    let res = this.os.open(this, url)
+    if (res) {
+      let tx = this.addStream(res.tx)
+      let rx = this.addStream(res.rx)
+      return { tx, rx }
     }
     return -1
   }
@@ -354,11 +388,14 @@ class Process {
   exit () {
     throw 'exit'
   }
+  signal (proc, sig) {
+    this.os.signal(this, proc, sig)
+  }
   wake (tag, data) {
     this.app.wake && this.defer(() => this.app.wake(tag, data))
   }
-  launch (cmd) {
-    return this.os.launch(cmd, this)
+  launch (cmd, args) {
+    return this.os.launch(cmd, args, this)
   }
   onWindowClose (win) {
     this.wake('window_close', win.localId)
@@ -401,6 +438,7 @@ class Process {
       "write",
       "close",
       "exit",
+      'signal',
       "launch",
       "defer",
       "magic"
@@ -426,10 +464,11 @@ class Process {
     };
 
     let iface = new Proxy({}, handler)
+    this.app.os = iface
 
     this.running = true
     this.app.main && this.defer(() => {
-      this.app.main(iface)
+      this.app.main()
     })
   }
 }
@@ -444,7 +483,7 @@ class OSWindow {
     this.titleBox = mkel('div', { text: title })
     this.titleBar.appendChild(this.titleBox)
     let buttonBox = mkel('div', { classes: [ 'buttons' ] })
-    let closeButton = mkel('div', { text: 'X' })
+    let closeButton = mkel('div', { text: '×' })
     closeButton.addEventListener('click', (e) => {
       e.stopPropagation()
       this.proc.onWindowClose(this)
