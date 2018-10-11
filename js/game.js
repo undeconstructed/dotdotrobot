@@ -1325,11 +1325,10 @@ class Run {
     for (let e of events) {
       e.n = this.n
     }
-    // XXX - areas ... ?
-    for (let [k, v] of this.world.airwaves.entries()) {
+    for (let [k, v] of this.cc.area.airwaves.entries()) {
       events.push({
         frequency: k,
-        data: v
+        data: v.data
       })
     }
     return events

@@ -124,7 +124,9 @@ class Kernel {
     let b = this.moving.w.box
     let dx = e.clientX - this.moving.x
     let dy = e.clientY - this.moving.y
-    this.moving.w.moveTo(b.offsetLeft + dx, b.offsetTop + dy)
+    let nx = b.offsetLeft + dx
+    let ny = Math.max(40, b.offsetTop + dy)
+    this.moving.w.moveTo(nx, ny)
     this.moving.x = e.clientX
     this.moving.y = e.clientY
   }
@@ -187,7 +189,7 @@ class Kernel {
     // process events of last tick
     let incoming = new Map()
     for (let e of state.events) {
-      if (e.typ === 'res') {
+      if (e.typ === 'res' || e.typ === 'error') {
         let m = this.magics.get(e.id)
         if (m) {
           this.defer(() => {
@@ -217,7 +219,8 @@ class Kernel {
       } else if (stream.d === 'rx') {
         let inl = incoming.get(stream.freq)
         if (inl) {
-          t.lines.push(inl)
+          stream.lines.push(inl)
+          this.pump(stream)
         }
       }
     }

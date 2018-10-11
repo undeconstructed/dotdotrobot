@@ -239,20 +239,29 @@ body {
   overflow: hidden;
 }
 
-.hinter {
+.hinter > div {
+  flex-grow: 1;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-around;
 }
 
 .console {
   overflow: auto;
 }
 .console .body {
+  flex-grow: 1;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 .console .scroller {
   flex-grow: 1;
   font-size: larger;
   font-family: monospace;
+  overflow: auto;
 }
 .console .scroller ul {
   list-style: none;

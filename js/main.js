@@ -93,8 +93,12 @@ class RemoteMagicCmd {
   }
   wake (tag, data) {
     if (tag === 'in') {
-      this.os.write(this.streams.tx, data)
-      this.os.read(this.streams.rx, 'res')
+      if (data === '') {
+        this.os.exit()
+      } else {
+        this.os.write(this.streams.tx, data)
+        this.os.read(this.streams.rx, 'res')
+      }
     } else if (tag === 'res') {
       this.os.write(1, data)
       this.os.read(0, 'in')
@@ -125,12 +129,8 @@ class Shell {
     }
   }
   main () {
-    this.scroller = mkel('div', { classes: [ 'scroller' ] })
-    this.scroller.addEventListener('click', (e) => {
-      this.inputBox.focus()
-    })
     this.drawnLines = mkel('ul')
-    this.scroller.appendChild(this.drawnLines)
+
     this.inputLine = mkel('div', { classes: [ 'inputline' ] })
     this.promptBox = mkel('span', { text: this.prompt })
     this.inputLine.appendChild(this.promptBox)
@@ -146,7 +146,16 @@ class Shell {
       }
     })
     this.inputLine.appendChild(this.inputBox)
-    this.scroller.appendChild(this.inputLine)
+
+    let scrolled = mkel('div')
+    scrolled.appendChild(this.drawnLines)
+    scrolled.appendChild(this.inputLine)
+
+    let scroller = mkel('div', { classes: [ 'scroller' ] })
+    scroller.appendChild(scrolled)
+    scroller.addEventListener('click', (e) => {
+      this.focus()
+    })
 
     this.buttonBox = mkel('div', { classes: [ 'buttons' ] })
     let killButton = mkel('button', { text: 'kill'} )
@@ -156,12 +165,16 @@ class Shell {
     this.buttonBox.appendChild(killButton)
 
     let body = mkel('div', { classes: [ 'body' ] })
-    body.appendChild(this.scroller)
+    body.appendChild(scroller)
     body.appendChild(this.buttonBox)
 
     this.window = this.os.newWindow('console', 'shell', body)
     this.os.moveWindow(this.window, 50, 50)
     this.os.resizeWindow(this.window, 600, 400)
+  }
+  focus () {
+    this.inputLine.scrollIntoView()
+    this.inputBox.focus()
   }
   setPrompt (prompt) {
     this.prompt = prompt
@@ -176,7 +189,9 @@ class Shell {
       // try to launch an app
       let args = i.trim().split(/\s+/)
       this.addLine(this.prompt + i)
-      this.run(args[0], args)
+      if (args[0]) {
+        this.run(args[0], args)
+      }
     }
   }
   onKill () {
@@ -226,6 +241,7 @@ class Shell {
     let e = mkel('li')
     e.textContent = i
     this.drawnLines.appendChild(e)
+    this.focus()
   }
 }
 
@@ -241,10 +257,8 @@ class Hinter {
     this.whichLine = 0
   }
   main () {
-    this.view = mkel('div')
-    this.line = mkel('p')
+    this.line = mkel('div')
     this.line.textContent = this.lines[this.whichLine]
-    this.view.appendChild(this.line)
     let nextButton = mkel('button')
     nextButton.textContent = 'more?'
     nextButton.addEventListener('click', (e) => {
@@ -253,7 +267,11 @@ class Hinter {
         this.line.textContent = this.lines[this.whichLine]
       }
     })
+
+    this.view = mkel('div')
+    this.view.appendChild(this.line)
     this.view.appendChild(nextButton)
+
     this.window = this.os.newWindow('hinter', 'story', this.view)
     this.os.moveWindow(this.window, 100, 100)
     this.os.resizeWindow(this.window, 400, 200)
@@ -267,11 +285,16 @@ class Hinter {
 
 class StateViewer {
   main () {
-    this.text = mkel('div')
+    this.text = mkel('div', { text: 'not done' })
     this.window = this.os.newWindow('viewer', 'state', this.text)
   }
   update (e) {
     this.text.textContent = JSON.stringify(e.val, mapper, '  ')
+  }
+  wake (tag, data) {
+    if (tag === 'window_close') {
+      this.os.exit()
+    }
   }
 }
 
@@ -447,6 +470,11 @@ class Manual {
     this.window = this.os.newWindow('manual', 'manual', this.text)
     this.os.moveWindow(this.window, 100, 100)
     this.os.resizeWindow(this.window, 400, 400)
+  }
+  wake (tag, data) {
+    if (tag === 'window_close') {
+      this.os.exit()
+    }
   }
 }
 
