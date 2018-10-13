@@ -79,7 +79,7 @@ export class MagicCmd {
         this.os.magic(data, 'res')
       }
     } else if (tag === 'res') {
-      this.os.write(1, data)
+      this.os.write(1, `rx: ${data}`)
       this.os.read(0, 'in')
     }
   }
@@ -92,6 +92,7 @@ export class RemoteMagicCmd {
       this.os.write(1, `usage: ${this.args[0]} <frequency>`)
       this.os.exit(1)
     }
+    this.counter = 1
     this.streams = this.os.open([ 'radio', parseInt(freq) ])
     this.os.read(0, 'in')
   }
@@ -100,11 +101,20 @@ export class RemoteMagicCmd {
       if (data === '') {
         this.os.exit()
       } else {
-        this.os.write(this.streams.tx, data)
+        let toSend = {
+          id: this.counter++,
+          src: data
+        }
+        this.os.write(this.streams.tx, JSON.stringify(toSend))
         this.os.read(this.streams.rx, 'res')
       }
     } else if (tag === 'res') {
-      this.os.write(1, data)
+      let res = JSON.parse(data)
+      if (res.id) {
+        this.os.write(1, `rx: ${res.id} (${res.typ}) ${res.val}`)
+      } else {
+        this.os.write(1, `??: ${data}`)
+      }
       this.os.read(0, 'in')
     }
   }

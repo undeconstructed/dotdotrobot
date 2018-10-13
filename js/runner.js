@@ -15,6 +15,9 @@ let tick = function() {
     let newEvents = game.run.tick(toSend)
     commands = []
     if (newEvents.length > 0) {
+      for (let e of newEvents) {
+        console.log('event', JSON.stringify(e))
+      }
       events = events.concat(newEvents)
     }
   } catch (e) {
@@ -25,6 +28,7 @@ let tick = function() {
 
 class Runner {
   command (command) {
+    console.log('command', JSON.stringify(command))
     commands.push(command)
   }
   read () {

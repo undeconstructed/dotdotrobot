@@ -255,7 +255,7 @@ class Area extends DotObject {
     return [b, m]
   }
   tx (frequency, data) {
-    console.log('tx', frequency, data)
+    // console.log('tx', frequency, data)
     this.airwavesNext.set(frequency, {
       done: false,
       data: data
@@ -264,7 +264,7 @@ class Area extends DotObject {
   rx (frequency) {
     let x = this.airwaves.get(frequency)
     if (x) {
-      console.log('rx', frequency, x.data)
+      // console.log('rx', frequency, x.data)
       return x.data
     }
     return null
@@ -583,6 +583,9 @@ class RadioCore {
     this.frequency = frequency
   }
   tx (host, data) {
+    if (typeof data != 'string') {
+      throw new Error('must write string')
+    }
     host.area.tx(this.frequency + 1, data)
   }
   rx (host) {
@@ -1128,7 +1131,9 @@ class SimpleControlCentre extends SimpleComposite {
 class ControlCentre extends SimpleControlCentre {
   constructor (run) {
     super(run, { colour: 'pink', size: 'medium' })
-    // events for sending back out of the game
+    // where commands come into the sim
+    this.commands = null
+    // events for sending back out of the sim
     this.events = []
     // some default words
     this.compileWord('sample', '1 2 + ;')
@@ -1139,15 +1144,18 @@ class ControlCentre extends SimpleControlCentre {
   }
   startTick (commands) {
     this.events = []
-    if (commands) {
-      for (let c of commands) {
+    this.commands = commands
+  }
+  tick () {
+    if (this.commands) {
+      for (let c of this.commands) {
         if (c.src) {
           // this is something to run in the machine
           if (!this.command(c)) {
             this.events.push({
               typ: 'error',
               val: `command overflow`,
-              cmd: c.id
+              cmd: c
             })
           }
         } else if (c.frequency) {
@@ -1156,13 +1164,17 @@ class ControlCentre extends SimpleControlCentre {
           this.area.tx(c.frequency, c.data)
         }
       }
+      this.commands = null
     }
+    super.tick()
   }
   endTick () {
     let res = this.results()
     if (res) {
       for (let r of res) {
-        if (r.id) {
+        if (r.cmd.id) {
+          r.id = r.cmd.id
+          delete r.cmd
           this.events.push(r)
         }
       }
@@ -1244,11 +1256,14 @@ class Robot1 extends Programmable {
     this.command({ src: `"seen" load ${args.hook}` })
   }
   tick () {
-    // this.n++
     let radioIn = this.radio.rx(this)
     if (radioIn) {
-      if (radioIn === 'name') {
-        return this.radio.tx(this, this.name)
+      let c = JSON.parse(radioIn)
+      if (c.src) {
+        c.radio = true
+        this.command(c)
+      } else if (radioIn === 'name') {
+        this.radio.tx(this, this.name)
       } else {
         this.radio.tx(this, '???')
       }
@@ -1264,6 +1279,14 @@ class Robot1 extends Programmable {
     if (this.machine.getVariable('debug')) {
       for (let r of this.results()) {
         this.socket0.push([ 'res', r ])
+      }
+    }
+    for (let r of this.results()) {
+      if (r.cmd.radio) {
+        r.id = r.cmd.id
+        delete r.cmd
+        let toSend = JSON.stringify(r)
+        this.radio.tx(this, toSend)
       }
     }
   }
@@ -1325,6 +1348,7 @@ class Run {
     for (let e of events) {
       e.n = this.n
     }
+    // TODO - this should be done through a radio in the control centre
     for (let [k, v] of this.cc.area.airwaves.entries()) {
       events.push({
         frequency: k,

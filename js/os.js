@@ -281,6 +281,9 @@ class Stream {
     this.os.pump(this)
   }
   write (i) {
+    if (typeof i != 'string') {
+      throw new Error('must write string')
+    }
     if (!this.open) {
       throw new Error('stream closed')
     }

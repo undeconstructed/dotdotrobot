@@ -389,7 +389,7 @@ export default class Machine {
         this.execution = null
         allRes.push({
           typ: 'res',
-          id: cmd.id,
+          cmd: cmd,
           val: res.res
         })
       }
@@ -397,8 +397,7 @@ export default class Machine {
       this.execution = null
       allRes.push({
         typ: 'error',
-        id: cmd.id,
-        src: cmd.src,
+        cmd: cmd,
         e: e,
         val: 'CRASH ' + e.message
       })
@@ -432,15 +431,14 @@ export default class Machine {
         } else {
           allRes.push({
             typ: 'res',
-            id: cmd.id,
+            cmd: cmd,
             val: res.res
           })
         }
       } catch (e) {
         allRes.push({
           typ: 'error',
-          id: cmd.id,
-          src: cmd.src,
+          cmd: cmd,
           e: e,
           val: 'CRASH ' + e.message
         })
