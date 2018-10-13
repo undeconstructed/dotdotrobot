@@ -11,27 +11,31 @@ are programmed. But what if you want to automate the automation by scripting
 your browser?
 
 Also, I wanted to play with some new ES6 features, such as modules. Modules
-provide a clean interface between code pieces, so might as well say that
-meta-automation is allowed too, as long as you don't breach the module boundary.
+provide a clean interface between code pieces, including providing a boundary
+between simulation and control. Anything that does not breach this boundary
+is not cheating.
 
-The simulation runs in the background (although currently in the same thread)
-in a module, and provides a serial connection to the simulation, taking in
-textual commands, spitting back events.
+## the UI
 
-The UI is another module, which uses only the public interface of runner.js. The
-UI updates with requestAnimationFrame, and is entirely decoupled from the
-simulation.
+The UI for the game is a windowed environment intended to be as flexible as
+possible. In the game world it is the UI of the control centre, which exists
+in the simulation as a real thing. It is implemented on a mock operation
+system.
 
-As far as I'm concerned nothing is cheating as long as you only interact only
-with the runner.js exported interface. Currently, that's this:
+## the OS
 
-```js
-class Runner {
-  command (command)
-  read ()
-  pause ()
-}
-```
+As time has gone on the frontend has become an increasingly complete Unix style
+operating system. It has simulated processes, communicating through streams,
+there are system calls that are monitored and logged. It's a bit over the top.
+
+Basically this has all happened because I haven't been able to make any
+decisions on what exactly is the purpose of any of this, so I've made
+everything as open as possible.
+
+It should hopefully be fairly fun to use the "OS" provided, although it is
+also possible to interact with the simulation through the Runner interface.
+This is also what the OS does, so it's not really cheating. It's pretty much
+writing a new OS for the command console thing.
 
 ## the simulation
 
@@ -41,27 +45,47 @@ have their own command interpreters, if they are programmable. The idea is that
 they behave like independent devices, and as such absolutely no attempt is made
 to make them efficient, they just run and whatever happens happens.
 
-There's a special object called the player, which is what receives the commands
-sent through the runner, and creates the events that are returned through the
-runner. There is no other way to interact with the world, and no way to get
-a global state view, you must go through the player object.
+There's a special object called the control centre, which is what receives the
+commands inputted, and creates the events that are returned. There is no other
+way to interact with the world, and no way to get a global state view, you must
+go through the control centre.
 
-The player is itself programmable, and is a composite thing. To interact with
-the world, you will need to send commands to the player that send commands to
-the component parts, such as arms and scanners. To get a view of the world you
-will need to aggregate the results of scanning and interacting with the world.
+The control centre is itself a programmable machine, and is a composite thing.
+To interact with the world, you will need to send commands to the control centre
+that cause it to interact with the world, using components such as arms and
+scanners. To get a view of the world you will need to aggregate the results of
+scanning and interacting with the world.
 
-There is a choice here, as you can program in javascript in your browser,
-allowing you to render views etc and interactively control the player. Or you
-can program the player to manage itself.
+There is a choice here, as you can program in the OS, reading events and writing
+commands, or you can automate the control centre's internal computer.
 
-With other things in the simulation there is less choice, because as soon as
-they are out of range of the player, you cannot interact with them anymore.
+With other machines in the simulation there is less choice, because as soon as
+they are out of range of the control centre, the OS has no way to interact with.
 There are robots, for example, that you can grab and program, but then they are
 on their own until they come back. Assuming you have programmed them to come
 back.
 
-## the language
+## the link
+
+The frontend is connected to the simulation via a suitably restrictive
+interface. The OS has system calls to send commands through to the simulated
+control centre, and hooks to pick up whatever data comes back.
+
+The interface is:
+
+```
+class Runner {
+  command (command)
+  read ()
+  pause ()
+}
+```
+
+Commands are ...
+Read returns events, which are ...
+Pause is pause.
+
+## the machine language
 
 The programming language of the machines is a little FORTH-like thing. You can
 either compile programs and install them, or just run them directly. Try:
@@ -77,112 +101,10 @@ as a spec, but didn't look at the code, as I wanted to do it all myself.
 
 ## the machines
 
-Explain the machines.
+The machines have some memory, some storage, etc. Storage can contain new
+FORTH words, that can then be called.
 
-## the environment
-
-You can send commands to a machine. That machine will run them, and send back
-answers. This all happens asynchronously as far as the game is concerned.
-Everything is in the same language, the command shell actually compiles your
-input into a program and runs it once.
-
-Apps can call any word that is installed.
-
-Everything is a FORTH word, either a compiled app, or a native piece of hardware
-functionality.
-
-## the player machine
-
-The player machine is in fact a composite machine. It has a special word
-called "tell" which passes on a script to a component. One component installed
-at the start is called "eye", try:
-
-`"scan" "eye" tell`
-
-The will run a word called "scan" on the eye, in the same way as you can
-directly run words on the player machine. In fact, all machines in the game use the
-same core, and so run in basically the same way.
-
-## try me
-
-### with simple composites
-
-```
-# look around
-look
-# tell look to run all the time
-"look" set-idle
-# the program the robot will run
-`:r 0 4 rand 2 - ; r r power ;` "robrun" compile
-# catch a robot
-grab
-# copy the run program to the robot
-"robrun" load "idle" arm-1-copy
-# release the robot
-release
-# is it moving?
-```
-
-```
-# using all the pre-programmed things
-160 degrees grab
-program
-160 degrees grab
-read
-```
-
-```
-# a complicated robot program
-`dup "count" store "n" store 1 "d" store ;` "robsetup" compile
-`
-:go "d" load 3 * dup log 0 power ;
-:stop 0 0 power ;
-:flip "d" load 1 = dup if 0 1 - "d" store "count" load "n" store ; invert if 0 "d" store ; ;
-"n" load 1 - dup "n" store 0 = dup if "d" load 1 = if scan "seen" store ; flip ; invert if go ; ;`
-"robrun" compile
-# catch a robot
-grab
-# copy setup program
-"robsetup" load "setup" arm-1-copy
-# run setup program
-`5 setup` arm-1-tell
-# copy run program as idle and release
-"robrun" load "idle" arm-1-copy release
-```
-
-### with socket composites
-
-```
-# compile a little test program
-`"testing" dup log` "test" compile
-# try running it
-test
-# load it onto the stack and copy it to the arm component
-"test" load "arm-1" "armtest" copy
-# tell the arm to run it
-`armtest` "arm-1" tell
-```
-
-```
-# look around
-look
-# tell look to run all the time
-"look" "idle" compile
-# the program the robot will run
-`:r 0 4 rand 2 - ; r r power ;` "robrun" compile
-# program to copy from arm to robot
-`"robrun" load "idle" copy` "copy-robrun" compile
-# copy them to the arm
-"robrun" load "arm-1" "robrun" copy
-"copy-robrun" load "arm-1" "copy-robrun" copy
-# catch a robot
-"grab" "arm-1" tell
-# copy the run program to the robot
-`copy-robrun` "arm-1" tell
-# release the robot
-"release" "arm-1" tell
-# is it moving?
-```
+More explanation goes here.
 
 ## TODO
 
