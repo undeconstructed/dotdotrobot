@@ -424,6 +424,16 @@ class Process {
       this.inside--
     })
   }
+  listFiles () {
+    return [ 'file' ]
+  }
+  writeFile (name, data) {
+  }
+  readFile(name) {
+    return ':fun 1 ; fun fun +'
+  }
+  deleteFile (name) {
+  }
   // this is the a syscall to access the other world
   magic (data, tag) {
     return this.os.magic(this, data, tag)
@@ -446,6 +456,10 @@ class Process {
       "exit",
       'signal',
       "launch",
+      "listFiles",
+      "writeFile",
+      "readFile",
+      "deleteFile",
       "defer",
       "magic"
     ])

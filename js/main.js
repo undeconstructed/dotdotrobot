@@ -63,6 +63,24 @@ class ForthCmd {
   }
 }
 
+class ForthCompilerCmd {
+  main () {
+    let file = this.args[1]
+    if (!file) {
+      this.os.write(1, `usage: ${this.args[0]} <file>`)
+      this.os.exit(1)
+    }
+    let data = this.os.readFile(file)
+    try {
+      let res = lang.parse(data)
+      this.os.write(1, `binary: ${JSON.stringify(res)}`)
+    } catch (e) {
+      this.os.write(1, `error: ${e}`)
+    }
+    this.os.exit()
+  }
+}
+
 class MagicCmd {
   main () {
     this.os.read(0, 'in')
@@ -125,6 +143,16 @@ class Shell {
       },
       'time': () => {
         this.addLine(this.os.getTime())
+      },
+      'ls': () => {
+        let ls = this.os.listFiles()
+        for (let file of ls) {
+          this.addLine(file)
+        }
+      },
+      'read': (args) => {
+        let data = this.os.readFile(args[1])
+        this.addLine(data)
       }
     }
   }
@@ -257,20 +285,30 @@ class Hinter {
     this.whichLine = 0
   }
   main () {
-    this.line = mkel('div')
-    this.line.textContent = this.lines[this.whichLine]
-    let nextButton = mkel('button')
-    nextButton.textContent = 'more?'
+    this.line = mkel('div', { text: this.lines[this.whichLine] })
+
+    let prevButton = mkel('button', { text: '<' })
+    prevButton.addEventListener('click', (e) => {
+      if (this.whichLine > 0) {
+        this.whichLine--
+        this.line.textContent = this.lines[this.whichLine]
+      }
+    })
+    let nextButton = mkel('button', { text: '>' })
     nextButton.addEventListener('click', (e) => {
-      if (this.whichLine < this.lines.length -1 ) {
+      if (this.whichLine < this.lines.length - 1) {
         this.whichLine++
         this.line.textContent = this.lines[this.whichLine]
       }
     })
 
+    let buttons = mkel('div')
+    buttons.appendChild(prevButton)
+    buttons.appendChild(nextButton)
+
     this.view = mkel('div')
     this.view.appendChild(this.line)
-    this.view.appendChild(nextButton)
+    this.view.appendChild(buttons)
 
     this.window = this.os.newWindow('hinter', 'story', this.view)
     this.os.moveWindow(this.window, 100, 100)
@@ -486,6 +524,7 @@ os.addApp('radar', Radar)
 os.addApp('shell', Shell)
 os.addApp('cat', CatCmd)
 os.addApp('forth', ForthCmd)
+os.addApp('forthc', ForthCompilerCmd)
 os.addApp('magic', MagicCmd)
 os.addApp('rmagic', RemoteMagicCmd)
 os.addApp('manual', Manual)
