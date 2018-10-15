@@ -97,16 +97,23 @@ class Kernel {
   }
   newWindow (proc, clazz, title) {
     let win = new OSWindow(proc, clazz, title)
-    win.z = (this.topWindow ? this.topWindow.z + 1 : 1)
+    win.z = 1
+    if (this.topWindow) {
+      this.topWindow.box.classList.remove('focused')
+      win.z = this.topWindow.z + 1
+    }
     win.box.style.zIndex = win.z
+    win.box.classList.add('focused')
     this.topWindow = win
 
     this.windows.add(win)
     this.element.appendChild(win.box)
     win.box.addEventListener('mousedown', (e) => {
       if (win != this.topWindow) {
+        this.topWindow.box.classList.remove('focused')
         win.z = this.topWindow.z + 1
         win.box.style.zIndex = win.z
+        win.box.classList.add('focused')
         this.topWindow = win
       }
     })
