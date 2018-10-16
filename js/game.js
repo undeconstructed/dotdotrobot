@@ -594,6 +594,21 @@ class RadioCore {
 }
 
 /**
+ * SimpleRadioComponent is a basic radio as a SimpleComponent.
+ */
+class SimpleRadioComponent extends SimpleComponent {
+  constructor (run) {
+    super(run)
+    this.core = new RadioCore()
+  }
+  tick () {
+  }
+  toString () {
+    return `radio@${this.core.frequency} ${super.toString()}`
+  }
+}
+
+/**
  * RadarCore is functionality of a scanner, for use in components etc.
  */
 class RadarCore {
@@ -649,7 +664,7 @@ class RadarSocketComponent extends SocketComponent {
  * RadarSimpleComponent is a basic scanner as a SimpleComponent.
  */
 class RadarSimpleComponent extends SimpleComponent {
-  constructor(run) {
+  constructor (run) {
     super(run, {
       ops: {
         'scan': (m, s) => {
@@ -669,7 +684,8 @@ class RadarSimpleComponent extends SimpleComponent {
   _scan (args) {
     let o = this.core.scan(this.owner)
     this.owner.machine.setVariable("seen", JSON.stringify(o))
-    this.owner.command({ src: `"seen" load "seen" list-from-json ${args.hook}` })
+    // this.owner.command({ src: `"seen" load "seen" list-from-json ${args.hook}` })
+    this.owner.command({ src: `${args.hook}` })
   }
   tick () {
     this.actions.tick()
@@ -1084,9 +1100,10 @@ class SimpleControlCentre extends SimpleComposite {
       })
     })
     this.addHardWord('return', (m, s) => {
-      let args = popArgs(s, [ 'data', 'name' ])
+      let args = popArgs(s, [ 'data', 'tag' ])
       this.events.push({
-        typ: args.name,
+        typ: 'ret',
+        tag: args.tag,
         val: args.data
       })
     })
@@ -1114,7 +1131,7 @@ class SimpleControlCentre extends SimpleComposite {
     this.compileWord('setup-mapping', '"map-data" list-new ;')
     this.compileWord('setup-scanning', '"look-loop-1" queue  ;')
 
-    this.compileWord('idle', 'setup-mapping setup-scanning "idle" delete ;')
+    // this.compileWord('idle', 'setup-mapping setup-scanning "idle" delete ;')
   }
   tick () {
     super.tick()
@@ -1178,6 +1195,13 @@ class ControlCentre extends SimpleControlCentre {
           this.events.push(r)
         }
       }
+    }
+    // TODO - this should be done through a radio
+    for (let [k, v] of this.area.airwaves.entries()) {
+      this.events.push({
+        frequency: k,
+        data: v.data
+      })
     }
     return this.events
   }
@@ -1347,13 +1371,6 @@ class Run {
     let events = this.cc.endTick()
     for (let e of events) {
       e.n = this.n
-    }
-    // TODO - this should be done through a radio in the control centre
-    for (let [k, v] of this.cc.area.airwaves.entries()) {
-      events.push({
-        frequency: k,
-        data: v.data
-      })
     }
     return events
   }

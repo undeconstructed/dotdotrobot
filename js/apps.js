@@ -123,10 +123,13 @@ export class RemoteMagicCmd {
 export class ScanCmd {
   main () {
     this.os.write(1, 'scanning...')
-    this.os.magic('eye-scan', 'res')
+    this.os.expect('seen', 'seen')
+    this.os.magic('`"seen" load "seen" return` "on-scan" compile "on-scan" eye-scan', 'res')
   }
   wake (tag, data) {
     if (tag === 'res') {
+      this.os.write(1, `rx: ${data}`)
+    } else if (tag === 'seen') {
       this.os.write(1, `rx: ${data}`)
       this.os.exit()
     }
@@ -379,6 +382,9 @@ export class Radar {
     this.os.resizeWindow(this.window, 400, 400)
     this.centre()
     this.draw()
+
+    this.os.expect('seen', 'seen')
+    this.os.magic('`"seen" load "seen" return` "on-scan" compile "on-scan" eye-scan', 'res')
   }
   centre () {
     this.canvas.scrollIntoView({ block: 'center', inline: 'center' })
@@ -420,17 +426,14 @@ export class Radar {
     let alpha = 1
     let fade = 0.5
     for (let [who, what] of [...this.data]) {
-      let s1 = true
       for (let set of what) {
         let x0 = this.w / 2 + set.x * this.scale
         let y0 = this.h / 2 + set.y * this.scale
-        if (s1) {
-          s1 = false
-          if (who !== 'self') {
-            this.drawScanPoint(ctx, x0, y0)
-          }
-          this.drawScanRange(ctx, x0, y0, set.range)
+        if (who !== 'self') {
+          // self is always already drawn, even when no data is available
+          this.drawScanPoint(ctx, x0, y0)
         }
+        this.drawScanRange(ctx, x0, y0, set.range)
         ctx.fillStyle = `rgb(0,255,0,${alpha})`
         for (let e of set.data) {
           ctx.beginPath()
@@ -498,8 +501,7 @@ export class Radar {
     this.self = position
   }
   update (e) {
-    let input = JSON.parse(e.val)
-    let [name, x, y, range, timeout, data] = input
+    let [name, x, y, range, timeout, data] = e
     let list = this.data.get(name) || []
     list.unshift({
       source: name, x: x, y: y, range: range, t: timeout, data: data
@@ -512,6 +514,8 @@ export class Radar {
   wake (tag, data) {
     if (tag === 'window_close') {
       this.os.exit()
+    } else if (tag === 'seen') {
+      this.update(['self', 0, 0, 5, 1, JSON.parse(data)])
     }
   }
 }

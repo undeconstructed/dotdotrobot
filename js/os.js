@@ -24,6 +24,7 @@ class Kernel {
     // dodgy magic
     this.magics = new Map()
     this.magicCounter = 0
+    this.expects = new Map()
     // topbar
     this.topBox = mkel('div', { classes: [ 'os', 'topbar' ] })
     this.timeBox = mkel('div', { classes: [ 'os', 'clock' ] })
@@ -165,6 +166,7 @@ class Kernel {
       for (let win of proc.windows.values()) {
         this.closeWindow(proc, win)
       }
+      // TODO - clean up magics and expects
       this.processes.delete(proc.id)
       proc.id = 0
     }
@@ -187,11 +189,18 @@ class Kernel {
     })
     if (tag) {
       this.magics.set(id, {
-        proc: proc,
+        proc: proc.id,
         tag: tag
       })
     }
     return id
+  }
+  expect (proc, inTag, outTag) {
+    this.expects.set(inTag, {
+      proc: proc.id,
+      inTag: inTag,
+      outTag: outTag
+    })
   }
   listProcesses () {
     let l = []
@@ -211,16 +220,34 @@ class Kernel {
     let incoming = new Map()
     for (let e of state.events) {
       if (e.typ === 'res' || e.typ === 'error') {
+        // direct results of magic
         let m = this.magics.get(e.id)
         if (m) {
-          this.defer(() => {
-            m.proc.wake(m.tag, e.val)
-          })
           this.magics.delete(e.id)
+          let proc = this.processes.get(m.proc)
+          if (proc) {
+            this.defer(() => {
+              proc.wake(m.tag, e.val)
+            })
+          }
+        }
+      } else if (e.typ === 'ret') {
+        // named returns
+        let p = this.expects.get(e.tag)
+        if (p) {
+          this.expects.delete(e.inTag)
+          let proc = this.processes.get(p.proc)
+          if (proc) {
+            this.defer(() => {
+              proc.wake(p.outTag, e.val)
+            })
+          }
         }
       } else if (e.frequency) {
+        // broadcasts
         incoming.set(e.frequency, e.data)
       } else {
+        // unknown
         console.log('lost event', e)
       }
     }
@@ -335,6 +362,7 @@ const ALL_SYSCALLS = [
   "deleteFile",
   "defer",
   "magic",
+  "expect",
   "listProcesses"
 ]
 
@@ -482,6 +510,10 @@ class Process {
   // this is the a syscall to access the other world
   magic (data, tag) {
     return this.os.magic(this, data, tag)
+  }
+  expect (inTag, outTag) {
+    outTag = outTag || inTag
+    return this.os.expect(this, inTag, outTag)
   }
   listProcesses () {
     return this.os.listProcesses()
