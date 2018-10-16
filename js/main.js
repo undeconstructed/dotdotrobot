@@ -30,6 +30,7 @@ os.addApp('forth', apps.ForthCmd)
 os.addApp('forthc', apps.ForthCompilerCmd)
 os.addApp('magic', apps.MagicCmd)
 os.addApp('rmagic', apps.RemoteMagicCmd)
+os.addApp('scan', apps.ScanCmd)
 
 // add some icons
 os.addIcon('huh?', 'story')

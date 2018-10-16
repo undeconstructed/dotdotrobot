@@ -120,6 +120,19 @@ export class RemoteMagicCmd {
   }
 }
 
+export class ScanCmd {
+  main () {
+    this.os.write(1, 'scanning...')
+    this.os.magic('eye-scan', 'res')
+  }
+  wake (tag, data) {
+    if (tag === 'res') {
+      this.os.write(1, `rx: ${data}`)
+      this.os.exit()
+    }
+  }
+}
+
 export class Shell {
   constructor () {
     this.prompt = '$ '
