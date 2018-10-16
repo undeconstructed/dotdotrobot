@@ -72,6 +72,7 @@ class Kernel {
     }
     let id = ++this.processCounter
     let proc = new Process(this, id, loaded, args)
+    proc.cmd = cmd
     this.processes.set(id, proc)
     let ret = {
       id: id,
@@ -192,6 +193,16 @@ class Kernel {
     }
     return id
   }
+  listProcesses () {
+    let l = []
+    for (let p of this.processes.values()) {
+      l.push({
+        id: p.id,
+        cmd: p.cmd
+      })
+    }
+    return l
+  }
   tick (state) {
     this.time = state.n
     this.timeBox.textContent = Math.floor(this.time / 10)
@@ -302,6 +313,30 @@ class Stream {
     this.os.pump(this)
   }
 }
+
+const ALL_SYSCALLS = [
+  "newWindow",
+  "moveWindow",
+  "resizeWindow",
+  "closeWindow",
+  "getTime",
+  "getSelf",
+  "getHandles",
+  "open",
+  "read",
+  "write",
+  "close",
+  "exit",
+  'signal',
+  "launch",
+  "listFiles",
+  "writeFile",
+  "readFile",
+  "deleteFile",
+  "defer",
+  "magic",
+  "listProcesses"
+]
 
 class Process {
   constructor (os, id, app, args) {
@@ -448,37 +483,19 @@ class Process {
   magic (data, tag) {
     return this.os.magic(this, data, tag)
   }
+  listProcesses () {
+    return this.os.listProcesses()
+  }
   run () {
     let x = this
 
-    const allowed = new Set([
-      "newWindow",
-      "moveWindow",
-      "resizeWindow",
-      "closeWindow",
-      "getTime",
-      "getSelf",
-      "getHandles",
-      "open",
-      "read",
-      "write",
-      "close",
-      "exit",
-      'signal',
-      "launch",
-      "listFiles",
-      "writeFile",
-      "readFile",
-      "deleteFile",
-      "defer",
-      "magic"
-    ])
+    const allowed = new Set(ALL_SYSCALLS)
 
     const handler = {
       get: function(target, prop, receiver) {
         if (!allowed.has(prop)) {
           console.log('invalid syscall', x.id, prop)
-          return null
+          throw 'invalidcall'
         }
         if (prop === 'defer') {
           return (...args) => x.defer(...args)

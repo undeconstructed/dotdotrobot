@@ -149,6 +149,12 @@ export class Shell {
       'read': (args) => {
         let data = this.os.readFile(args[1])
         this.addLine(data)
+      },
+      'ps': (args) => {
+        let data = this.os.listProcesses()
+        for (let p of data) {
+          this.addLine(`${p.id} ${p.cmd}`)
+        }
       }
     }
   }
