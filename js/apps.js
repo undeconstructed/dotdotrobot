@@ -18,9 +18,25 @@ export class CatCmd {
       if (data === '') {
         this.os.exit()
       } else {
-        this.os.write(1, data)
+        this.os.write(1, `read: ${data}`)
         this.os.read(0, 'in')
       }
+    } else if (tag === 'sig') {
+      this.os.write(1, `sig: ${data}`)
+    }
+  }
+}
+
+export class EveryCmd {
+  main () {
+    this.os.timeout(10, 'ping')
+  }
+  wake (tag, data) {
+    if (tag === 'ping') {
+      this.os.write(1, `ping`)
+      this.os.timeout(10, 'ping')
+    } else if (tag === 'sig') {
+      this.os.exit(0)
     }
   }
 }
@@ -171,6 +187,9 @@ export class Shell {
         for (let p of data) {
           this.addLine(`${p.id} ${p.cmd}`)
         }
+      },
+      'kill': (args) => {
+        this.os.signal(parseInt(args[1]), parseInt(args[2]))
       }
     }
   }
@@ -204,10 +223,15 @@ export class Shell {
     })
 
     this.buttonBox = mkel('div', { classes: [ 'buttons' ] })
+    let intButton = mkel('button', { text: 'int'} )
+    intButton.addEventListener('click', (e) => {
+      this.os.defer(() => this.onInt())
+    })
     let killButton = mkel('button', { text: 'kill'} )
     killButton.addEventListener('click', (e) => {
       this.os.defer(() => this.onKill())
     })
+    this.buttonBox.appendChild(intButton)
     this.buttonBox.appendChild(killButton)
 
     let body = mkel('div', { classes: [ 'body' ] })
@@ -238,6 +262,11 @@ export class Shell {
       if (args[0]) {
         this.run(args[0], args)
       }
+    }
+  }
+  onInt () {
+    if (this.proc) {
+      this.os.signal(this.proc.id, 1)
     }
   }
   onKill () {
@@ -390,6 +419,9 @@ export class Radar {
     this.canvas.scrollIntoView({ block: 'center', inline: 'center' })
   }
   draw (e) {
+    if (this.halt) {
+      return
+    }
     let ctx = this.canvas.getContext('2d')
     // ctx.globalCompositeOperation = 'destination-over'
     ctx.clearRect(0, 0, this.w, this.h)
@@ -513,6 +545,7 @@ export class Radar {
   }
   wake (tag, data) {
     if (tag === 'window_close') {
+      this.halt = true
       this.os.exit()
     } else if (tag === 'seen') {
       this.update(['self', 0, 0, 5, 1, JSON.parse(data)])

@@ -1,6 +1,6 @@
 
 import runner from './runner.js'
-import { mkel } from './util.js'
+import { assert, mkel } from './util.js'
 import * as lang from './lang.js'
 
 const STDIN = 0
@@ -12,15 +12,17 @@ class Kernel {
   constructor (element) {
     this.element = element
     this.time = 0
-    this.icons = 0
     this.apps = {}
+    this.tasks = []
     this.streams = new Map()
     this.streamCounter = this.streams.size
     this.processes = new Map()
     this.processCounter = 0
-    this.windows = new Set()
+    this.windows = new Map()
     this.windowCounter = 0
     this.topWindow = null
+    this.timeouts = new Map()
+    this.timeoutCounter = 0
     // dodgy magic
     this.magics = new Map()
     this.magicCounter = 0
@@ -33,7 +35,7 @@ class Kernel {
     let dockBox = mkel('div', { classes: [ 'os', 'dockbox' ] })
     this.dockBox = mkel('div', { classes: [ 'os', 'dock' ] })
     dockBox.appendChild(this.dockBox)
-    // construct
+    // assemble UI
     this.element.appendChild(this.topBox)
     this.element.appendChild(dockBox)
     // window management
@@ -47,7 +49,10 @@ class Kernel {
         this.stopMove(e)
       }
     })
+    // tick
+    window.setTimeout(() => this.tick(), 0)
   }
+  // external API
   addApp (cmd, app) {
     this.apps[cmd] = app
   }
@@ -63,72 +68,78 @@ class Kernel {
       this.launch(cmd)
     })
   }
-  launch (cmd, args, parent) {
-    let app = this.apps[cmd]
-    let loaded = null
-    try {
-      loaded = new app()
-    } catch (e) {
+  launch (cmd, args) {
+    let p = this.createProcess(cmd, args)
+    if (!p) {
       return null
     }
-    let id = ++this.processCounter
-    let proc = new Process(this, id, loaded, args)
-    proc.cmd = cmd
-    this.processes.set(id, proc)
-    let ret = {
-      id: id,
-    }
-    if (parent) {
-      let newStdin = proc.handles.get(STDIN)
-      let newStdout = proc.handles.get(STDOUT)
-      ret.in = parent.addStream(newStdin)
-      ret.out = parent.addStream(newStdout)
-    }
-    this.defer(() => proc.run())
-    return ret
+    this.enqueue(() => p.run())
+    return p.id
   }
-  signal (proc, tgt, sig) {
-    let tgtProc = this.processes.get(tgt)
-    if (tgtProc) {
-      if (sig === 9) {
-        this.defer(() => {
-          this.exit(tgtProc)
-        })
-      }
-    }
-  }
-  newWindow (proc, clazz, title) {
-    let win = new OSWindow(proc, clazz, title)
-    win.z = 1
+  // window syscalls
+  newWindow (proc, clazz, title, body) {
+    let id = this.streamCounter++
+    let w = new OSWindow(id, proc.id, clazz, title, body)
+    this.windows.set(id, w)
+
+    w.z = 1
     if (this.topWindow) {
       this.topWindow.box.classList.remove('focused')
-      win.z = this.topWindow.z + 1
+      w.z = this.topWindow.z + 1
     }
-    win.box.style.zIndex = win.z
-    win.box.classList.add('focused')
-    this.topWindow = win
+    w.box.style.zIndex = w.z
+    w.box.classList.add('focused')
+    this.topWindow = w
 
-    this.windows.add(win)
-    this.element.appendChild(win.box)
-    win.box.addEventListener('mousedown', (e) => {
-      if (win != this.topWindow) {
+    w.box.addEventListener('mousedown', (e) => {
+      if (w != this.topWindow) {
         this.topWindow.box.classList.remove('focused')
-        win.z = this.topWindow.z + 1
-        win.box.style.zIndex = win.z
-        win.box.classList.add('focused')
-        this.topWindow = win
+        w.z = this.topWindow.z + 1
+        w.box.style.zIndex = w.z
+        w.box.classList.add('focused')
+        this.topWindow = w
       }
     })
-    win.titleBar.addEventListener('mousedown', (e) => {
+    w.titleBar.addEventListener('mousedown', (e) => {
       e.preventDefault()
-      this.startMove(e, win)
+      this.startMove(e, w)
     }, { capture: false })
-    return win
+    w.closeButton.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.wakeProcess(proc.id, 'window_close', id)
+    })
+
+    // this.enqueue(() => {
+      this.element.appendChild(w.box)
+    // })
+
+    return id
   }
-  closeWindow (proc, win) {
-    this.windows.delete(win)
-    this.element.removeChild(win.box)
+  moveWindow (proc, id, x, y) {
+    let win = this.windows.get(id)
+    if (!win) {
+      this.os.crashProcess(proc)
+      throw new Error('no window ' + handle)
+    }
+    win.moveTo(x, y)
   }
+  resizeWindow (proc, id, w, h) {
+    let win = this.windows.get(id)
+    if (!win) {
+      this.crashProcess(proc)
+      throw new Error('no window ' + id)
+    }
+    win.resize(w, h)
+  }
+  closeWindow (proc, id) {
+    let w = this.windows.get(id)
+    if (!w) {
+      this.crashProcess(proc)
+      throw new Error('no window ' + id)
+    }
+    this.removeWindow(w)
+  }
+  // window internals
   startMove (e, w) {
     this.moving = { x: e.clientX, y: e.clientY, w: w }
   }
@@ -145,7 +156,18 @@ class Kernel {
   stopMove (e) {
     this.moving = null
   }
-  open (proc, url) {
+  removeWindow (w) {
+    this.windows.delete(w.id)
+    this.element.removeChild(w.box)
+  }
+  // stream syscalls
+  newStream (proc) {
+    let id = this.streamCounter++
+    let stream = new Stream(id, proc.id)
+    this.streams.set(id, stream)
+    return stream
+  }
+  openStream (proc, url) {
     if (url[0] == 'radio') {
       let tx = this.newStream(proc)
       let rx = this.newStream(proc)
@@ -157,30 +179,94 @@ class Kernel {
     }
     return null
   }
-  exit (proc) {
+  // process syscalls
+  launchProcess (proc, cmd, args) {
+    let p = this.createProcess(cmd, args)
+    if (!p) {
+      return -1
+    }
+
+    let newStdin = p.handles.get(STDIN)
+    let newStdout = p.handles.get(STDOUT)
+
+    let ret = {
+      id: p.id,
+      in: proc.addStream(newStdin),
+      out: proc.addStream(newStdout)
+    }
+
+    this.enqueue(() => p.run())
+
+    return ret
+  }
+  signal (proc, tgt, sig) {
+    let tgtProc = this.processes.get(tgt)
+    if (tgtProc) {
+      if (sig === 9) {
+        this.exitProcess(tgtProc)
+      } else {
+        tgtProc.wake('sig', sig)
+      }
+    }
+  }
+  listProcesses (proc) {
+    let l = []
+    for (let p of this.processes.values()) {
+      l.push({
+        id: p.id,
+        cmd: p.cmd
+      })
+    }
+    return l
+  }
+  // process internals
+  exitProcess (proc) {
     proc.running = false
     if (proc.id) {
-      for (let stream of proc.handles.values()) {
-        stream.unlink(proc)
+      for (let [id, s] of proc.handles) {
+        s.unlink(proc.id)
       }
-      for (let win of proc.windows.values()) {
-        this.closeWindow(proc, win)
+      for (let [id, w] of this.windows) {
+        if (w.owner === proc.id) {
+          this.removeWindow(w)
+          this.windows.delete(id)
+        }
+      }
+      for (let [id, m] of this.magics) {
+        if (m.proc === proc.id) {
+          this.magics.delete(id)
+        }
+      }
+      for (let [inTag, e] of this.expects) {
+        if (e.proc === proc.id) {
+          this.expects.delete(inTag)
+        }
+      }
+      for (let [id, t] of this.timeouts) {
+        if (t.proc === proc.id) {
+          this.timeouts.delete(id)
+        }
       }
       // TODO - clean up magics and expects
       this.processes.delete(proc.id)
       proc.id = 0
     }
   }
-  crash (proc, e) {
-    console.log('crashing', proc.id, e)
-    this.exit(proc)
+  crashProcess (proc, e) {
+    console.log('crashing', proc, e)
+    this.exitProcess(proc)
   }
-  newStream (proc) {
-    let id = this.streamCounter++
-    let stream = new Stream(this, id, proc)
-    this.streams.set(id, stream)
-    return stream
+  // timer syscalls
+  setTimeout (proc, time, tag) {
+    let id = ++this.timeoutCounter
+    this.timeouts.set(id, {
+      proc: proc.id,
+      tag: tag,
+      time: time
+    })
+    return id
   }
+  // hardware syscalls
   magic (proc, data, tag) {
     let id = ++this.magicCounter
     runner.command({
@@ -202,21 +288,18 @@ class Kernel {
       outTag: outTag
     })
   }
-  listProcesses () {
-    let l = []
-    for (let p of this.processes.values()) {
-      l.push({
-        id: p.id,
-        cmd: p.cmd
-      })
-    }
-    return l
+  // internals
+  enqueue (task) {
+    this.tasks.push(task)
   }
-  tick (state) {
+  tick () {
+    let state = runner.read()
     this.time = state.n
+
+    // update displays
     this.timeBox.textContent = Math.floor(this.time / 10)
 
-    // process events of last tick
+    // process any simulation events
     let incoming = new Map()
     for (let e of state.events) {
       if (e.typ === 'res' || e.typ === 'error') {
@@ -224,24 +307,14 @@ class Kernel {
         let m = this.magics.get(e.id)
         if (m) {
           this.magics.delete(e.id)
-          let proc = this.processes.get(m.proc)
-          if (proc) {
-            this.defer(() => {
-              proc.wake(m.tag, e.val)
-            })
-          }
+          this.wakeProcess(m.proc, m.tag, e.val)
         }
       } else if (e.typ === 'ret') {
         // named returns
-        let p = this.expects.get(e.tag)
-        if (p) {
-          this.expects.delete(e.inTag)
-          let proc = this.processes.get(p.proc)
-          if (proc) {
-            this.defer(() => {
-              proc.wake(p.outTag, e.val)
-            })
-          }
+        let ex = this.expects.get(e.tag)
+        if (ex) {
+          this.expects.delete(ex.inTag)
+          this.wakeProcess(ex.proc, ex.outTag, e.val)
         }
       } else if (e.frequency) {
         // broadcasts
@@ -252,10 +325,9 @@ class Kernel {
       }
     }
 
-    // XXX - OS work shouldn't be tied to animation tick
-
-    // process network streams
+    // process streams
     for (let stream of this.streams.values()) {
+      // network streams out and in
       if (stream.d === 'tx') {
         let l = stream.lines.pop()
         if (l) {
@@ -268,10 +340,33 @@ class Kernel {
         let inl = incoming.get(stream.freq)
         if (inl) {
           stream.lines.push(inl)
-          this.pump(stream)
         }
       }
+      // pump all streams, regardless of state
+      this.pump(stream)
     }
+
+    // process timeouts
+    for (let [id, t] of this.timeouts) {
+      t.time--
+      if (t.time <= 0) {
+        this.timeouts.delete(id)
+        this.wakeProcess(t.proc, t.tag)
+      }
+    }
+
+    // any other OS tasks
+    for (let t of this.tasks) {
+      t()
+    }
+    this.tasks = []
+
+    // tick processes
+    for (let [id, p] of this.processes) {
+      p.tick()
+    }
+
+    window.setTimeout(() => this.tick(), 100)
   }
   pump (stream) {
     if (stream.reader) {
@@ -279,15 +374,11 @@ class Kernel {
         let l = stream.lines.pop()
         let r = stream.reader
         stream.reader = null
-        this.defer(() => {
-          r.proc.wake(r.tag, l)
-        })
+        this.wakeProcess(r.proc, r.tag, l)
       } else if (!stream.open) {
         let r = stream.reader
         stream.reader = null
-        this.defer(() => {
-          r.proc.wake(r.tag, 0)
-        })
+        this.wakeProcess(r.proc, r.tag, 0)
       }
     }
     if (stream.procs.size == 0) {
@@ -295,17 +386,35 @@ class Kernel {
       this.streams.delete(stream.id)
     }
   }
-  defer (task) {
-    window.setTimeout(task, 0)
+  createProcess (cmd, args) {
+    let app = this.apps[cmd]
+    if (!app) {
+      return null
+    }
+    let loaded = null
+    try {
+      loaded = new app()
+    } catch (e) {
+      return null
+    }
+    app.wake = app.wake || (() => null)
+    let id = ++this.processCounter
+    let p = new Process(this, id, loaded, args, cmd)
+    this.processes.set(id, p)
+    return p
+  }
+  wakeProcess (id, tag, data) {
+    let proc = this.processes.get(id)
+    assert(proc, 'no process')
+    proc.wake(tag, data)
   }
 }
 
 class Stream {
-  constructor (os, id, owner) {
-    this.os = os
+  constructor (id, owner) {
     this.id = id
     this.owner = owner
-    this.procs = new Set([ owner ])
+    this.procs = new Set([ owner.id ])
     this.open = true
     this.lines = []
     this.reader = null
@@ -315,7 +424,6 @@ class Stream {
       throw new Error('stream closed')
     }
     this.procs.add(proc)
-    this.os.pump(this)
   }
   unlink (proc) {
     this.procs.delete(proc)
@@ -323,7 +431,9 @@ class Stream {
       this.open = false
       this.owner = null
     }
-    this.os.pump(this)
+    if (this.reader && this.reader.proc === proc) {
+      this.reader = null
+    }
   }
   write (i) {
     if (typeof i != 'string') {
@@ -333,11 +443,49 @@ class Stream {
       throw new Error('stream closed')
     }
     this.lines.push(i)
-    this.os.pump(this)
   }
   read (proc, tag) {
-    this.reader = { proc, tag }
-    this.os.pump(this)
+    this.reader = { proc: proc.id, tag: tag }
+  }
+}
+
+class OSWindow {
+  constructor (id, owner, clazz, title, body) {
+    this.id = id
+    this.owner = owner
+    this.body = null
+
+    this.box = mkel('div', { classes: ['window'] })
+
+    this.titleBar = mkel('div', { classes: [ 'os', 'title' ] })
+    this.titleBox = mkel('div', { text: title })
+    this.titleBar.appendChild(this.titleBox)
+    let buttonBox = mkel('div', { classes: [ 'buttons' ] })
+    this.closeButton = mkel('div', { text: '×' })
+    buttonBox.appendChild(this.closeButton)
+    this.titleBar.appendChild(buttonBox)
+    this.box.appendChild(this.titleBar)
+
+    this.bodyBox = mkel('div', { classes: [ 'body', clazz ] })
+    this.box.appendChild(this.bodyBox)
+
+    this.setBody(body)
+  }
+  moveTo (x, y) {
+    this.box.style.left = `${x}px`
+    this.box.style.top =`${y}px`
+  }
+  resize (w, h) {
+    this.box.style.width = `${w}px`
+    this.box.style.height = `${h}px`
+  }
+  setBody (element) {
+    if (this.body) {
+      this.bodyBox.replaceChild(element, this.body)
+    } else {
+      this.bodyBox.appendChild(element)
+    }
+    this.body = element
   }
 }
 
@@ -363,53 +511,86 @@ const ALL_SYSCALLS = [
   "defer",
   "magic",
   "expect",
-  "listProcesses"
+  "listProcesses",
+  "timeout"
 ]
 
 class Process {
-  constructor (os, id, app, args) {
+  constructor (os, id, app, args, cmd) {
     this.os = os
     this.id = id
     this.app = app
+    this.cmd = cmd
     app.args = args
-    this.running = false
+    this.tasks = []
     this.inside = 0
     this.handles = new Map()
     this.handles.set(STDIN, os.newStream(this))
     this.handles.set(STDOUT, os.newStream(this))
     this.handleCounter = this.handles.size
-    this.windows = new Map()
-    this.windowCounter = 0
   }
-  addStream (stream) {
-    stream.link(this)
-    let id = this.handleCounter++
-    this.handles.set(id, stream)
-    return id
+  // for OS use
+  run () {
+    let x = this
+
+    const allowed = new Set(ALL_SYSCALLS)
+
+    const handler = {
+      get: function(target, prop, receiver) {
+        if (!allowed.has(prop)) {
+          console.log('invalid syscall', x.id, prop)
+          throw 'invalidcall'
+        }
+        if (prop === 'defer') {
+          return (...args) => x.enqueue(...args)
+        }
+        return (...args) => {
+          console.log('syscall', x.id, prop, args)
+          if (x.inside < 1) {
+            throw 'notinside'
+          }
+          return x[prop](...args)
+        }
+      }
+    };
+
+    let iface = new Proxy({}, handler)
+    this.app.os = iface
+
+    this.running = true
+    this.app.main && this.enqueue(() => {
+      this.app.main()
+    })
   }
+  wake (tag, data) {
+    this.enqueue(() => this.app.wake(tag, data))
+  }
+  tick () {
+    let task = this.tasks.shift()
+    if (task) {
+      this.inside++
+      try {
+        task(this)
+      } catch (e) {
+        if (e === 'exit') {
+          this.os.exitProcess(this)
+        } else {
+          this.os.crashProcess(this, e)
+        }
+      }
+      this.inside--
+    }
+  }
+  // syscalls
   newWindow(clazz, title, body) {
-    let win = this.os.newWindow(this, clazz, title)
-    let id = ++this.windowCounter
-    win.localId = id
-    this.windows.set(id, win)
-    win.setBody(body)
+    let id = this.os.newWindow(this, clazz, title, body)
     return id
   }
   moveWindow (id, x, y) {
-    let win = this.windows.get(id)
-    if (!win) {
-      this.os.crash(this)
-      throw new Error('no window ' + handle)
-    }
-    win.moveTo(x, y)
+    return this.os.moveWindow(this, id, x, y)
   }
   resizeWindow (id, w, h) {
-    let win = this.windows.get(id)
-    if (!win) {
-      this.os.crash(this)
-      throw new Error('no window ' + handle)
-    }
-    win.resize(w, h)
+    return this.os.resizeWindow(this, id, w, h)
   }
   closeWindow (id) {
     let win = this.windows.get(id)
@@ -431,7 +612,7 @@ class Process {
     return ids
   }
   open (url) {
-    let res = this.os.open(this, url)
+    let res = this.os.openStream(this, url)
     if (res) {
       let tx = this.addStream(res.tx)
       let rx = this.addStream(res.rx)
@@ -442,10 +623,10 @@ class Process {
   close (handle) {
     let stream = this.handles.get(handle)
     if (!stream) {
-      this.os.crash(this)
+      this.os.crashProcess(this)
       throw new Error('no stream ' + handle)
     }
-    stream.unlink(this)
+    stream.unlink(this.id)
     delete this.handles.delete(handle)
   }
   read (handle, tag) {
@@ -468,34 +649,10 @@ class Process {
     throw 'exit'
   }
   signal (proc, sig) {
-    this.os.signal(this, proc, sig)
-  }
-  wake (tag, data) {
-    this.app.wake && this.defer(() => this.app.wake(tag, data))
+    return this.os.signal(this, proc, sig)
   }
   launch (cmd, args) {
-    return this.os.launch(cmd, args, this)
-  }
-  onWindowClose (win) {
-    this.wake('window_close', win.localId)
-  }
-  defer (f) {
-    this.os.defer((e) => {
-      if (!this.running) {
-        throw 'notrunning'
-      }
-      this.inside++
-      try {
-        f()
-      } catch (e) {
-        if (e === 'exit') {
-          this.os.exit(this)
-        } else {
-          this.os.crash(this, e)
-        }
-      }
-      this.inside--
-    })
+    return this.os.launchProcess(this, cmd, args)
   }
   listFiles () {
     return [ 'file' ]
@@ -507,7 +664,6 @@ class Process {
   }
   deleteFile (name) {
   }
-  // this is the a syscall to access the other world
   magic (data, tag) {
     return this.os.magic(this, data, tag)
   }
@@ -518,79 +674,18 @@ class Process {
   listProcesses () {
     return this.os.listProcesses()
   }
-  run () {
-    let x = this
-
-    const allowed = new Set(ALL_SYSCALLS)
-
-    const handler = {
-      get: function(target, prop, receiver) {
-        if (!allowed.has(prop)) {
-          console.log('invalid syscall', x.id, prop)
-          throw 'invalidcall'
-        }
-        if (prop === 'defer') {
-          return (...args) => x.defer(...args)
-        }
-        return (...args) => {
-          console.log('syscall', x.id, prop, args)
-          if (x.inside < 1) {
-            throw 'notinside'
-          }
-          return x[prop](...args)
-        }
-      }
-    };
-
-    let iface = new Proxy({}, handler)
-    this.app.os = iface
-
-    this.running = true
-    this.app.main && this.defer(() => {
-      this.app.main()
-    })
+  timeout (time, tag) {
+    return this.os.setTimeout(this, time, tag)
   }
-}
-
-class OSWindow {
-  constructor (proc, clazz, title) {
-    this.proc = proc
-
-    this.box = mkel('div', { classes: ['window'] })
-
-    this.titleBar = mkel('div', { classes: [ 'os', 'title' ] })
-    this.titleBox = mkel('div', { text: title })
-    this.titleBar.appendChild(this.titleBox)
-    let buttonBox = mkel('div', { classes: [ 'buttons' ] })
-    let closeButton = mkel('div', { text: '×' })
-    closeButton.addEventListener('click', (e) => {
-      e.stopPropagation()
-      this.proc.onWindowClose(this)
-    })
-    buttonBox.appendChild(closeButton)
-    this.titleBar.appendChild(buttonBox)
-    this.box.appendChild(this.titleBar)
-
-    this.bodyBox = mkel('div', { classes: [ 'body', clazz ] })
-    this.box.appendChild(this.bodyBox)
-
-    this.body = null
+  // internals
+  addStream (stream) {
+    stream.link(this.id)
+    let id = this.handleCounter++
+    this.handles.set(id, stream)
+    return id
   }
-  moveTo (x, y) {
-    this.box.style.left = `${x}px`
-    this.box.style.top =`${y}px`
-  }
-  resize (w, h) {
-    this.box.style.width = `${w}px`
-    this.box.style.height = `${h}px`
-  }
-  setBody (element) {
-    if (this.body) {
-      this.bodyBox.replaceChild(element, this.body)
-    } else {
-      this.bodyBox.appendChild(element)
-    }
-    this.body = element
+  enqueue (task) {
+    this.tasks.push(task)
   }
 }
 
