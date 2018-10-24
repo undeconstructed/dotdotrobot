@@ -6,6 +6,10 @@ import * as lang from './lang.js'
 const STDIN = 0
 const STDOUT = 1
 
+const EXIT = Symbol('exit')
+const INVALID_CALL = Symbol('invalidcall')
+const NOT_INSIDE = Symbol('notinside')
+
 // XXX process and stream really aren't classes, they aren't allowed to do anything without the kernel's consent
 
 class Kernel {
@@ -73,13 +77,46 @@ class Kernel {
     if (!p) {
       return null
     }
-    this.enqueue(() => p.run())
-    return p.id
+    p.process.run()
+    return p.process.id
+  }
+  // misc syscalls
+  getTime (proc) {
+    return this.time
   }
   // window syscalls
   newWindow (proc, clazz, title, body) {
+    let w = this.createWindow(proc, clazz, title, body)
+    return w.id
+  }
+  moveWindow (proc, id, x, y) {
+    let win = this.windows.get(id)
+    if (!win) {
+      this.os.crashProcess(proc)
+      throw new Error('no window ' + handle)
+    }
+    win.moveTo(x, y)
+  }
+  resizeWindow (proc, id, w, h) {
+    let win = this.windows.get(id)
+    if (!win) {
+      this.crashProcess(proc)
+      throw new Error('no window ' + id)
+    }
+    win.resize(w, h)
+  }
+  closeWindow (proc, id) {
+    let w = this.windows.get(id)
+    if (!w) {
+      this.crashProcess(proc)
+      throw new Error('no window ' + id)
+    }
+    this.removeWindow(w)
+  }
+  // window internals
+  createWindow (owner, clazz, title, body) {
     let id = this.streamCounter++
-    let w = new OSWindow(id, proc.id, clazz, title, body)
+    let w = new OSWindow(id, owner.id, clazz, title, body)
     this.windows.set(id, w)
 
     w.z = 1
@@ -112,34 +149,8 @@ class Kernel {
     // this.enqueue(() => {
       this.element.appendChild(w.box)
     // })
-
-    return id
+    return w
   }
-  moveWindow (proc, id, x, y) {
-    let win = this.windows.get(id)
-    if (!win) {
-      this.os.crashProcess(proc)
-      throw new Error('no window ' + handle)
-    }
-    win.moveTo(x, y)
-  }
-  resizeWindow (proc, id, w, h) {
-    let win = this.windows.get(id)
-    if (!win) {
-      this.crashProcess(proc)
-      throw new Error('no window ' + id)
-    }
-    win.resize(w, h)
-  }
-  closeWindow (proc, id) {
-    let w = this.windows.get(id)
-    if (!w) {
-      this.crashProcess(proc)
-      throw new Error('no window ' + id)
-    }
-    this.removeWindow(w)
-  }
-  // window internals
   startMove (e, w) {
     this.moving = { x: e.clientX, y: e.clientY, w: w }
   }
@@ -161,41 +172,63 @@ class Kernel {
     this.element.removeChild(w.box)
   }
   // stream syscalls
-  newStream (proc) {
-    let id = this.streamCounter++
-    let stream = new Stream(id, proc.id)
-    this.streams.set(id, stream)
-    return stream
-  }
   openStream (proc, url) {
     if (url[0] == 'radio') {
-      let tx = this.newStream(proc)
-      let rx = this.newStream(proc)
+      let tx = this.createStream(proc)
       tx.d = 'tx'
-      rx.d = 'rx'
       tx.freq = url[1]
+      let rx = this.createStream(proc)
+      rx.d = 'rx'
       rx.freq = url[1] + 1
-      return { tx, rx }
+
+      return {
+        tx: proc.addStream(tx.id),
+        rx: proc.addStream(rx.id)
+      }
     }
     return null
+  }
+  readStream (proc, sid, tag) {
+    let s = this.streams.get(sid)
+    assert (s, `no stream ${sid}`)
+    return s.read(proc, tag)
+  }
+  writeStream (proc, sid, data) {
+    let s = this.streams.get(sid)
+    assert (s, `no stream ${sid}`)
+    return s.write(data)
+  }
+  unlinkStream (proc, sid) {
+    let s = this.streams.get(sid)
+    assert (s, `no stream ${sid}`)
+    return s.unlink(proc)
+  }
+  // stream internals
+  createStream (owner) {
+    let id = this.streamCounter++
+    let stream = new Stream(id, owner.id)
+    this.streams.set(id, stream)
+    return stream
   }
   // process syscalls
   launchProcess (proc, cmd, args) {
     let p = this.createProcess(cmd, args)
     if (!p) {
-      return -1
+      return null
     }
 
-    let newStdin = p.handles.get(STDIN)
-    let newStdout = p.handles.get(STDOUT)
+    // link streams to the parent process
+    p.stdIn.link(proc)
+    p.stdOut.link(proc)
 
+    // create return, including process local stream handles
     let ret = {
-      id: p.id,
-      in: proc.addStream(newStdin),
-      out: proc.addStream(newStdout)
+      id: p.process.id,
+      tx: proc.addStream(p.stdIn.id),
+      rx: proc.addStream(p.stdOut.id)
     }
 
-    this.enqueue(() => p.run())
+    p.process.run()
 
     return ret
   }
@@ -223,13 +256,13 @@ class Kernel {
   exitProcess (proc) {
     proc.running = false
     if (proc.id) {
-      for (let [id, s] of proc.handles) {
+      for (let [id, sid] of proc.handles) {
+        let s = this.streams.get(sid)
         s.unlink(proc.id)
       }
       for (let [id, w] of this.windows) {
         if (w.owner === proc.id) {
           this.removeWindow(w)
-          this.windows.delete(id)
         }
       }
       for (let [id, m] of this.magics) {
@@ -247,7 +280,6 @@ class Kernel {
           this.timeouts.delete(id)
         }
       }
-      // TODO - clean up magics and expects
       this.processes.delete(proc.id)
       proc.id = 0
     }
@@ -391,17 +423,31 @@ class Kernel {
     if (!app) {
       return null
     }
+
     let loaded = null
     try {
       loaded = new app()
     } catch (e) {
       return null
     }
+
     app.wake = app.wake || (() => null)
+
     let id = ++this.processCounter
     let p = new Process(this, id, loaded, args, cmd)
     this.processes.set(id, p)
-    return p
+
+    let stdIn = this.createStream(p)
+    let stdOut = this.createStream(p)
+
+    p.addStream(stdIn.id)
+    p.addStream(stdOut.id)
+
+    return {
+      process: p,
+      stdIn: stdIn,
+      stdOut: stdOut
+    }
   }
   wakeProcess (id, tag, data) {
     let proc = this.processes.get(id)
@@ -419,6 +465,7 @@ class Stream {
     this.lines = []
     this.reader = null
   }
+  // for OS use
   link (proc) {
     if (!this.open) {
       throw new Error('stream closed')
@@ -471,6 +518,7 @@ class OSWindow {
 
     this.setBody(body)
   }
+  // for OS use
   moveTo (x, y) {
     this.box.style.left = `${x}px`
     this.box.style.top =`${y}px`
@@ -520,16 +568,17 @@ class Process {
     this.os = os
     this.id = id
     this.app = app
+    this.args = app.args = args
     this.cmd = cmd
-    app.args = args
     this.tasks = []
-    this.inside = 0
+    this.inside = false
     this.handles = new Map()
-    this.handles.set(STDIN, os.newStream(this))
-    this.handles.set(STDOUT, os.newStream(this))
-    this.handleCounter = this.handles.size
+    this.handleCounter = 0
   }
   // for OS use
+  enqueue (task) {
+    this.tasks.push(task)
+  }
   run () {
     let x = this
 
@@ -539,15 +588,15 @@ class Process {
       get: function(target, prop, receiver) {
         if (!allowed.has(prop)) {
           console.log('invalid syscall', x.id, prop)
-          throw 'invalidcall'
+          throw INVALID_CALL
         }
         if (prop === 'defer') {
           return (...args) => x.enqueue(...args)
         }
         return (...args) => {
           console.log('syscall', x.id, prop, args)
-          if (x.inside < 1) {
-            throw 'notinside'
+          if (!x.inside) {
+            throw NOT_INSIDE
           }
           return x[prop](...args)
         }
@@ -562,29 +611,33 @@ class Process {
       this.app.main()
     })
   }
+  addStream (stream) {
+    let id = this.handleCounter++
+    this.handles.set(id, stream)
+    return id
+  }
   wake (tag, data) {
     this.enqueue(() => this.app.wake(tag, data))
   }
   tick () {
     let task = this.tasks.shift()
     if (task) {
-      this.inside++
+      this.inside = true
       try {
         task(this)
       } catch (e) {
-        if (e === 'exit') {
-          this.os.exitProcess(this)
+        if (e === EXIT) {
+          this.running && this.os.exitProcess(this)
         } else {
-          this.os.crashProcess(this, e)
+          this.running && this.os.crashProcess(this, e)
         }
       }
-      this.inside--
+      this.inside = false
     }
   }
   // syscalls
   newWindow(clazz, title, body) {
-    let id = this.os.newWindow(this, clazz, title, body)
-    return id
+    return this.os.newWindow(this, clazz, title, body)
   }
   moveWindow (id, x, y) {
     return this.os.moveWindow(this, id, x, y)
@@ -593,60 +646,44 @@ class Process {
     return this.os.resizeWindow(this, id, w, h)
   }
   closeWindow (id) {
-    let win = this.windows.get(id)
-    if (!win) {
-      this.os.crash(this)
-      throw new Error('no window ' + handle)
-    }
-    this.os.closeWindow(this, win)
-    this.windows.delete(id)
+    return this.os.closeWindow(this, id)
   }
   getTime () {
-    return this.os.time
+    return this.os.getTime(this)
   }
   getSelf () {
     return this.id
   }
   getHandles () {
-    let ids = Array.from(this.handles.keys()).join(' ')
-    return ids
+    return Array.from(this.handles.keys()).join(' ')
   }
   open (url) {
-    let res = this.os.openStream(this, url)
-    if (res) {
-      let tx = this.addStream(res.tx)
-      let rx = this.addStream(res.rx)
-      return { tx, rx }
-    }
-    return -1
+    return this.os.openStream(this, url)
   }
   close (handle) {
-    let stream = this.handles.get(handle)
-    if (!stream) {
-      this.os.crashProcess(this)
-      throw new Error('no stream ' + handle)
+    let sid = this.handles.get(handle)
+    if (sid === undefined) {
+      throw new Error(`no stream ${handle}`)
     }
-    stream.unlink(this.id)
+    this.os.unlinkStream(this, sid)
     delete this.handles.delete(handle)
   }
   read (handle, tag) {
-    let stream = this.handles.get(handle)
-    if (!stream) {
-      this.os.crash(this)
-      throw new Error('no stream ' + handle)
+    let sid = this.handles.get(handle)
+    if (sid === undefined) {
+      throw new Error(`no stream ${handle}`)
     }
-    stream.read(this, tag)
+    this.os.readStream(this, sid, tag)
   }
   write (handle, data) {
-    let stream = this.handles.get(handle)
-    if (!stream) {
-      this.os.crash(this)
-      throw new Error('no stream ' + handle)
+    let sid = this.handles.get(handle)
+    if (sid === undefined) {
+      throw new Error(`no stream ${handle}`)
     }
-    stream.write(data)
+    this.os.writeStream(this, sid, data)
   }
   exit () {
-    throw 'exit'
+    throw EXIT
   }
   signal (proc, sig) {
     return this.os.signal(this, proc, sig)
@@ -676,16 +713,6 @@ class Process {
   }
   timeout (time, tag) {
     return this.os.setTimeout(this, time, tag)
-  }
-  // internals
-  addStream (stream) {
-    stream.link(this.id)
-    let id = this.handleCounter++
-    this.handles.set(id, stream)
-    return id
-  }
-  enqueue (task) {
-    this.tasks.push(task)
   }
 }
 

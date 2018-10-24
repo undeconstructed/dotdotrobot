@@ -254,7 +254,7 @@ export class Shell {
     if (this.proc) {
       this.addLine(i)
       // forward to the running app
-      this.os.write(this.proc.in, i)
+      this.os.write(this.proc.tx, i)
     } else {
       // try to launch an app
       let args = i.trim().split(/\s+/)
@@ -284,9 +284,9 @@ export class Shell {
         this.prompt0 = this.prompt
         this.setPrompt('')
         this.addLine('> launched ' + this.proc.id)
-        this.os.read(this.proc.out, 'fromapp')
+        this.os.read(this.proc.rx, 'fromapp')
       } else {
-        this.addLine('unknown')
+        this.addLine(`${i}: command not found`)
       }
     }
   }
@@ -296,7 +296,7 @@ export class Shell {
         this.onExit()
       } else {
         this.onOutput(data)
-        this.os.read(this.proc.out, 'fromapp')
+        this.os.read(this.proc.rx, 'fromapp')
       }
     } else if (tag === 'window_close') {
       this.os.exit()
@@ -306,8 +306,8 @@ export class Shell {
     this.addLine(e)
   }
   onExit () {
-    this.os.close(this.proc.in)
-    this.os.close(this.proc.out)
+    this.os.close(this.proc.tx)
+    this.os.close(this.proc.rx)
     this.addLine('> exited ' + this.proc.id)
     this.proc = null
     this.setPrompt(this.prompt0)
@@ -316,7 +316,7 @@ export class Shell {
     let e = mkel('li')
     e.textContent = i
     this.drawnLines.appendChild(e)
-    this.focus()
+    this.inputLine.scrollIntoView()
   }
 }
 
