@@ -119,7 +119,11 @@ export class RemoteMagicCmd extends Lib {
       this.exit(1)
     }
     this.counter = 1
-    this.streams = this.sys('open', [ 'radio', parseInt(freq) ])
+    this.streams = this.sys('open', [ 'radio', freq ])
+    if (!this.streams) {
+      this.print(`error: can't open radio`)
+      this.exit(1)
+    }
     this.gets('in')
   }
   wake (tag, data) {

@@ -17,6 +17,8 @@ let WorldModule = {
     // syscalls
     os.syscalls.set('magic', this._magic)
     os.syscalls.set('expect', this._expect)
+    // protocols
+    os.protocols.set('radio', this._openRadio)
   },
   tick: function () {
     let state = runner.read()
@@ -91,6 +93,22 @@ let WorldModule = {
       inTag: inTag,
       outTag: outTag
     })
+  },
+  // protocols
+  _openRadio: function (proc, uri) {
+    let freq = parseInt(uri)
+    // TODO - keep separate records to avoid annotating streams
+    let tx = this.createStream(proc)
+    tx.d = 'tx'
+    tx.freq = freq
+    let rx = this.createStream(proc)
+    rx.d = 'rx'
+    rx.freq = freq + 1
+
+    return {
+      tx: this.addStreamToProcess(proc, tx),
+      rx: this.addStreamToProcess(proc, rx)
+    }
   }
 }
 

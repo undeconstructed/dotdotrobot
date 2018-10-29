@@ -51,6 +51,9 @@ export class Kernel {
       [ "listProcesses", this._listProcesses ],
       [ "timeout", this._setTimeout ]
     ])
+    this.protocols = new Map([
+      [ "file", this._openFile ]
+    ])
     // console
     this.console = mkel('div', { classes: [ 'console' ] })
     this.element.appendChild(this.console)
@@ -156,19 +159,10 @@ export class Kernel {
   }
   // stream syscalls
   _openStream (proc, url) {
-    if (url[0] == 'radio') {
-      // TODO - keep separate records to avoid annotating streams
-      let tx = this.createStream(proc)
-      tx.d = 'tx'
-      tx.freq = url[1]
-      let rx = this.createStream(proc)
-      rx.d = 'rx'
-      rx.freq = url[1] + 1
-
-      return {
-        tx: this.addStreamToProcess(proc, tx),
-        rx: this.addStreamToProcess(proc, rx)
-      }
+    let [proto, uri] = url
+    let opener = this.protocols.get(proto)
+    if (opener) {
+      return opener.apply(this, [ proc, uri ])
     }
     return null
   }
@@ -236,10 +230,13 @@ export class Kernel {
   }
   _writeFile (proc, name, data) {
   }
-  _readFile(proc, name) {
+  _readFile (proc, name) {
     return ':fun 1 ; fun fun +'
   }
-  _deleteFile(proc, name) {
+  _deleteFile (proc, name) {
+  }
+  _openFile (proc, uri) {
+    return null
   }
   // stream internals
   createStream (owner) {
