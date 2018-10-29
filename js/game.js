@@ -576,6 +576,18 @@ class SimpleComponent extends DotLive {
 }
 
 /**
+ * LocatorCore is functionality of a GPS thing, for use in components etc.
+ */
+class LocatorCore {
+  locate (host) {
+    return {
+      x: host.position.x,
+      y: host.position.y
+    }
+  }
+}
+
+/**
  * RadioCore is functionality of a radio thing, for use in components etc.
  */
 class RadioCore {
@@ -1224,6 +1236,7 @@ class Robot1 extends Programmable {
     this.power = { d: 0, p: 0 }
     this.actions = new ActionQueue(1)
     // hardwired components
+    this.locator = new LocatorCore()
     this.scanner = new RadarCore()
     this.radio = new RadioCore(frequency)
     // ops
@@ -1261,6 +1274,10 @@ class Robot1 extends Programmable {
       let args = popArgs(s, ['hook'])
       this.actions.add({ end: () => this._scan(args), ticks: 1 * this.hz })
     })
+    this.machine.addHardWord('locate', (m, s) => {
+      let l = this.locator.locate(this)
+      this.machine.setVariable('location', JSON.stringify(l))
+    })
     // programs
     this.compileWord('degrees', '90 - 180 / pi * ;')
     this.compileWord('explore', '0 degrees 3 5 "on-arrive" drive ;')
@@ -1276,7 +1293,7 @@ class Robot1 extends Programmable {
   }
   _scan (args) {
     let o = this.scanner.scan(this)
-    this.machine.setVariable('seen', o)
+    this.machine.setVariable('seen', JSON.stringify(o))
     this.command({ src: `"seen" load ${args.hook}` })
   }
   tick () {
