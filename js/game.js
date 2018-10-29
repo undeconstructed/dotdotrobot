@@ -1361,7 +1361,7 @@ class Run {
     this.world = new World(this, 1000, 1000)
     this.cc = new ControlCentre(this)
     this.cc.place(this.world, { x: 500, y: 500 })
-    this.addRandomRobot({ x: 502, y: 505 })
+    this.addRandomRobot({ freq: 100, x: 502, y: 505 })
     this.addRandomRobot({ x: 498, y: 500 })
     // this.addRandomRobot({ x: 8, y: 22 })
     // this.addRandomRobot({ x: 80, y: 90 })
@@ -1370,7 +1370,7 @@ class Run {
   addRandomRobot (opts) {
     let name = random.name()
     let colour = random.colour()
-    let freq = random.int(0, 1000)
+    let freq = opts.freq || random.int(0, 1000)
     console.log('frequency', freq)
     new Robot1(this, name, colour, freq).place(this.world, opts)
   }
