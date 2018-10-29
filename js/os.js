@@ -1,5 +1,4 @@
 
-import runner from './runner.js'
 import { assert, mkel } from './util.js'
 import * as lang from './lang.js'
 
@@ -14,7 +13,12 @@ export class Kernel {
   constructor (element, modules, apps, icons) {
     this.element = element
     this.time = 0
-    this.apps = {}
+    this.modules = modules || []
+    this.defaultApps = apps
+    this.defaultIcons = icons
+    this.apps = new Map()
+  }
+  boot () {
     this.tasks = []
     this.streams = new Map()
     this.streamCounter = this.streams.size
@@ -25,44 +29,40 @@ export class Kernel {
     this.topWindow = null
     this.timeouts = new Map()
     this.timeoutCounter = 1
-    // syscalls
-    this.syscalls = {
-      "getTime": this._getTime,
-      "getSelf": this._getSelf,
-      "getHandles": this._getHandles,
-      "open": this._openStream,
-      "read": this._readStream,
-      "write": this._writeStream,
-      "close": this._closeStream,
-      'signal': this._signalProcess,
-      "launch": this._launchProcess,
-      "listFiles": this._listFiles,
-      "writeFile": this._writeFile,
-      "readFile": this._readFile,
-      "deleteFile": this._deleteFile,
-      "newWindow": this._newWindow,
-      "moveWindow": this._moveWindow,
-      "resizeWindow": this._resizeWindow,
-      "closeWindow": this._closeWindow,
-      "magic": this._magic,
-      "expect": this._expect,
-      "listProcesses": this._listProcesses,
-      "timeout": this._setTimeout
-    }
-    // dodgy magic
-    this.magics = new Map()
-    this.magicCounter = 0
-    this.expects = new Map()
+    // default syscalls
+    this.syscalls = new Map([
+      [ "getTime", this._getTime ],
+      [ "getSelf", this._getSelf ],
+      [ "getHandles", this._getHandles ],
+      [ "open", this._openStream ],
+      [ "read", this._readStream ],
+      [ "write", this._writeStream ],
+      [ "close", this._closeStream ],
+      [ 'signal', this._signalProcess ],
+      [ "launch", this._launchProcess ],
+      [ "listFiles", this._listFiles ],
+      [ "writeFile", this._writeFile ],
+      [ "readFile", this._readFile ],
+      [ "deleteFile", this._deleteFile ],
+      [ "newWindow", this._newWindow ],
+      [ "moveWindow", this._moveWindow ],
+      [ "resizeWindow", this._resizeWindow ],
+      [ "closeWindow", this._closeWindow ],
+      [ "listProcesses", this._listProcesses ],
+      [ "timeout", this._setTimeout ]
+    ])
+    // console
+    this.console = mkel('div', { classes: [ 'console' ] })
+    this.element.appendChild(this.console)
     // topbar
     this.topBox = mkel('div', { classes: [ 'os', 'topbar' ] })
     this.timeBox = mkel('div', { classes: [ 'os', 'clock' ] })
     this.topBox.appendChild(this.timeBox)
+    this.element.appendChild(this.topBox)
     // dock
     let dockBox = mkel('div', { classes: [ 'os', 'dockbox' ] })
     this.dockBox = mkel('div', { classes: [ 'os', 'dock' ] })
     dockBox.appendChild(this.dockBox)
-    // assemble UI
-    this.element.appendChild(this.topBox)
     this.element.appendChild(dockBox)
     // window management
     this.element.addEventListener('mousemove', (e) => {
@@ -76,10 +76,13 @@ export class Kernel {
       }
     })
     // setup
-    for (let [cmd, app] of apps) {
+    for (let mod of this.modules) {
+      mod.init && mod.init(this)
+    }
+    for (let [cmd, app] of this.defaultApps) {
       this.addApp(cmd, app)
     }
-    for (let [label, cmd] of icons) {
+    for (let [label, cmd] of this.defaultIcons) {
       this.addIcon(label, cmd)
     }
     // tick
@@ -89,11 +92,21 @@ export class Kernel {
   syscall (proc, name, args) {
     proc = this.getProcess(proc)
     if (!proc) {
-      console.log('no proc', proc)
+      this.log(`no proc: ${proc}`)
       return
     }
-    let sc = this.syscalls[name]
-    return sc.apply(this, [proc, ...args])
+    let sc = this.syscalls.get(name)
+    if (!sc) {
+      this.log(`no syscall: ${name}`)
+      return
+    }
+
+    this.log(`${proc.id} ${name} ${args}`)
+    let r = sc.apply(this, [proc, ...args])
+    if (r !== undefined) {
+      this.log(`=> ${r}`)
+    }
+    return r
   }
   // misc syscalls
   _getTime (proc) {
@@ -114,28 +127,6 @@ export class Kernel {
       time: time
     })
     return id
-  }
-  // hardware syscalls
-  _magic (proc, data, tag) {
-    let id = ++this.magicCounter
-    runner.command({
-      id: id,
-      src: data
-    })
-    if (tag) {
-      this.magics.set(id, {
-        proc: proc.id,
-        tag: tag
-      })
-    }
-    return id
-  }
-  _expect (proc, inTag, outTag) {
-    this.expects.set(inTag, {
-      proc: proc.id,
-      inTag: inTag,
-      outTag: outTag
-    })
   }
   // window syscalls
   _newWindow (proc, clazz, title, body) {
@@ -175,8 +166,8 @@ export class Kernel {
       rx.freq = url[1] + 1
 
       return {
-        tx: proc.addStream(tx.id),
-        rx: proc.addStream(rx.id)
+        tx: this.addStreamToProcess(proc, tx),
+        rx: this.addStreamToProcess(proc, rx)
       }
     }
     return null
@@ -353,9 +344,9 @@ export class Kernel {
       if (!p.inside) {
         throw NOT_INSIDE
       }
-      console.log('syscall', p.id, name, args)
+      // console.log('syscall', p.id, name, args)
       let r = this.syscall(p.id, name, args)
-      console.log('=>', r)
+      // console.log('=>', r)
       return r
     }
 
@@ -571,68 +562,25 @@ export class Kernel {
     this.tasks.push(task)
   }
   tick () {
-    let state = runner.read()
-    this.time = state.n
-
-    // update displays
-    this.timeBox.textContent = Math.floor(this.time / 10)
-
-    // process any simulation events
-    let incoming = new Map()
-    for (let e of state.events) {
-      if (e.typ === 'res' || e.typ === 'error') {
-        // direct results of magic
-        let m = this.magics.get(e.id)
-        if (m) {
-          this.magics.delete(e.id)
-          this.wakeProcess(this.getProcess(m.proc), m.tag, e.val)
-        }
-      } else if (e.typ === 'ret') {
-        // named returns
-        let ex = this.expects.get(e.tag)
-        if (ex) {
-          this.expects.delete(ex.inTag)
-          this.wakeProcess(this.getProcess(ex.proc), ex.outTag, e.val)
-        }
-      } else if (e.frequency) {
-        // broadcasts
-        incoming.set(e.frequency, e.data)
-      } else {
-        // unknown
-        console.log('lost event', e)
-      }
-    }
-
-    // process streams
-    for (let stream of this.streams.values()) {
-      // network streams out and in
-      if (stream.d === 'tx') {
-        let l = stream.lines.pop()
-        if (l) {
-          runner.command({
-            frequency: stream.freq,
-            data: l
-          })
-        }
-      } else if (stream.d === 'rx') {
-        let inl = incoming.get(stream.freq)
-        if (inl) {
-          stream.lines.push(inl)
-        }
-      }
-      // pump all streams, regardless of state
-      let wakes = this.pump(stream)
-      for (let [pid, tag, l] of wakes) {
-        this.wakeProcess(this.getProcess(pid), tag, l)
-      }
-    }
-
     // process timeouts
     for (let [id, t] of this.timeouts) {
       t.time--
       if (t.time <= 0) {
         this.timeouts.delete(id)
         this.wakeProcess(this.getProcess(t.proc), t.tag)
+      }
+    }
+
+    for (let mod of this.modules) {
+      mod.tick && mod.tick.apply(this)
+    }
+
+    // process streams
+    for (let stream of this.streams.values()) {
+      // pump all streams, regardless of state
+      let wakes = this.pump(stream)
+      for (let [pid, tag, l] of wakes) {
+        this.wakeProcess(this.getProcess(pid), tag, l)
       }
     }
 
@@ -668,6 +616,14 @@ export class Kernel {
       this.streams.delete(stream.id)
     }
     return wakes
+  }
+  log (t) {
+    if (this.console.childElementCount > 100) {
+      this.console.removeChild(this.console.firstElementChild)
+    }
+    let line = mkel('p', { text: t })
+    this.console.appendChild(line)
+    line.scrollIntoView()
   }
 }
 

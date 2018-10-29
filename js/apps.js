@@ -1,39 +1,49 @@
 
 import { mkel } from './util.js'
 import * as lang from './lang.js'
+import * as os from './os.js'
 
-export class StatusCmd {
+export class Lib {
+  print (line) {
+    this.sys('write', os.STDOUT, line)
+  }
+  gets (tag) {
+    this.sys('read', os.STDIN, tag)
+  }
+}
+
+export class StatusCmd extends Lib {
   main () {
-    this.sys('write', 1, 'not good')
+    this.print('not good')
     this.exit()
   }
 }
 
-export class CatCmd {
+export class CatCmd extends Lib {
   main () {
-    this.sys('read', 0, 'in')
+    this.gets('in')
   }
   wake (tag, data) {
     if (tag === 'in') {
       if (data === '') {
         this.exit()
       } else {
-        this.sys('write', 1, `read: ${data}`)
-        this.sys('read', 0, 'in')
+        this.print(`read: ${data}`)
+        this.gets('in')
       }
     } else if (tag === 'sig') {
-      this.sys('write', 1, `sig: ${data}`)
+      this.print(`sig: ${data}`)
     }
   }
 }
 
-export class EveryCmd {
+export class EveryCmd extends Lib {
   main () {
     this.sys('timeout', 10, 'ping')
   }
   wake (tag, data) {
     if (tag === 'ping') {
-      this.sys('write', 1, `ping`)
+      this.print(`ping`)
       this.sys('timeout', 10, 'ping')
     } else if (tag === 'sig') {
       this.exit(0)
@@ -41,9 +51,9 @@ export class EveryCmd {
   }
 }
 
-export class ForthCmd {
+export class ForthCmd extends Lib {
   main () {
-    this.sys('read', 0, 'in')
+    this.gets('in')
   }
   wake (tag, data) {
     if (tag === 'in') {
@@ -51,8 +61,8 @@ export class ForthCmd {
         this.exit()
       } else {
         let res = this.run(data)
-        this.sys('write', 1, res)
-        this.sys('read', 0, 'in')
+        this.print(res)
+        this.gets('in')
       }
     }
   }
@@ -65,27 +75,27 @@ export class ForthCmd {
   }
 }
 
-export class ForthCompilerCmd {
+export class ForthCompilerCmd extends Lib {
   main () {
     let file = this.args[1]
     if (!file) {
-      this.sys('write', 1, `usage: ${this.args[0]} <file>`)
+      this.print(`usage: ${this.args[0]} <file>`)
       this.exit(1)
     }
     let data = this.sys('readFile', file)
     try {
       let res = lang.parse(data)
-      this.sys('write', 1, `binary: ${JSON.stringify(res)}`)
+      this.print(`binary: ${JSON.stringify(res)}`)
     } catch (e) {
-      this.sys('write', 1, `error: ${e}`)
+      this.print(`error: ${e}`)
     }
     this.exit()
   }
 }
 
-export class MagicCmd {
+export class MagicCmd extends Lib {
   main () {
-    this.sys('read', 0, 'in')
+    this.gets('in')
   }
   wake (tag, data) {
     if (tag === 'in') {
@@ -95,22 +105,22 @@ export class MagicCmd {
         this.sys('magic', data, 'res')
       }
     } else if (tag === 'res') {
-      this.sys('write', 1, `rx: ${data}`)
-      this.sys('read', 0, 'in')
+      this.print(`rx: ${data}`)
+      this.gets('in')
     }
   }
 }
 
-export class RemoteMagicCmd {
+export class RemoteMagicCmd extends Lib {
   main () {
     let freq = this.args[1]
     if (!freq) {
-      this.sys('write', 1, `usage: ${this.args[0]} <frequency>`)
+      this.print(`usage: ${this.args[0]} <frequency>`)
       this.exit(1)
     }
     this.counter = 1
     this.streams = this.sys('open', [ 'radio', parseInt(freq) ])
-    this.sys('read', 0, 'in')
+    this.gets('in')
   }
   wake (tag, data) {
     if (tag === 'in') {
@@ -127,33 +137,34 @@ export class RemoteMagicCmd {
     } else if (tag === 'res') {
       let res = JSON.parse(data)
       if (res.id) {
-        this.sys('write', 1, `rx: ${res.id} (${res.typ}) ${res.val}`)
+        this.print(`rx: ${res.id} (${res.typ}) ${res.val}`)
       } else {
-        this.sys('write', 1, `??: ${data}`)
+        this.print(`??: ${data}`)
       }
-      this.sys('read', 0, 'in')
+      this.gets('in')
     }
   }
 }
 
-export class ScanCmd {
+export class ScanCmd extends Lib {
   main () {
-    this.sys('write', 1, 'scanning...')
+    this.print('scanning...')
     this.sys('expect', 'seen', 'seen')
     this.sys('magic', '`"seen" load "seen" return` "on-scan" compile "on-scan" eye-scan', 'res')
   }
   wake (tag, data) {
     if (tag === 'res') {
-      this.sys('write', 1, `rx: ${data}`)
+      this.print(`rx: ${data}`)
     } else if (tag === 'seen') {
-      this.sys('write', 1, `rx: ${data}`)
+      this.print(`rx: ${data}`)
       this.exit()
     }
   }
 }
 
-export class Shell {
+export class Shell extends Lib {
   constructor () {
+    super()
     this.prompt = '$ '
     this.commands = {
       'exit': () => {
@@ -320,8 +331,9 @@ export class Shell {
   }
 }
 
-export class Hinter {
+export class Hinter extends Lib {
   constructor () {
+    super()
     this.lines = [
       'good news! the world has blown up or something, but you can put it back together',
       'that\'s why you\'ve been locked in this box, with just this computer to talk to',
@@ -368,7 +380,7 @@ export class Hinter {
   }
 }
 
-export class StateViewer {
+export class StateViewer extends Lib {
   main () {
     this.text = mkel('div', { text: 'not done' })
     this.window = this.sys('newWindow', 'viewer', 'state', this.text)
@@ -383,8 +395,9 @@ export class StateViewer {
   }
 }
 
-export class Radar {
+export class Radar extends Lib {
   constructor () {
+    super()
     this.data = new Map()
     this.w = 800
     this.h = 800
@@ -553,7 +566,7 @@ export class Radar {
   }
 }
 
-export class Manual {
+export class Manual extends Lib {
   main () {
     this.text = mkel('div')
     this.text.textContent = 'manual'
