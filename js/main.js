@@ -1,44 +1,51 @@
 
 import { mkel } from './util.js'
-import OS from './os.js'
+import * as os from './os.js'
 import * as apps from './apps.js'
 import * as lang from './lang.js'
 
 // create the OS
 
-let os = new OS(document.getElementById('main'))
+class MagicModule {
+  init () {
+  }
+  tick () {
+  }
+  syscall (name, args) {
+  }
+}
 
-// install apps
+let modules = [
+  MagicModule
+]
+let defaultApps = [
+  ['story', apps.Hinter],
+  ['manual', apps.Manual],
+  ['radar', apps.Radar],
+  ['shell', apps.Shell],
+  ['status', apps.StatusCmd],
+  ['cat', apps.CatCmd],
+  ['every', apps.EveryCmd],
+  ['forth', apps.ForthCmd],
+  ['forthc', apps.ForthCompilerCmd],
+  ['magic', apps.MagicCmd],
+  ['rmagic', apps.RemoteMagicCmd],
+  ['scan', apps.ScanCmd]
+]
+let defaultIcons = [
+  ['huh?', 'story'],
+  ['manual', 'manual'],
+  ['shell', 'shell'],
+  ['radar', 'radar'],
+  ['files', 'files'],
+  ['editor', 'editor']
+]
 
-os.addApp('story', apps.Hinter)
-os.addApp('manual', apps.Manual)
-os.addApp('radar', apps.Radar)
-os.addApp('shell', apps.Shell)
-os.addApp('status', apps.StatusCmd)
-os.addApp('cat', apps.CatCmd)
-os.addApp('every', apps.EveryCmd)
-os.addApp('forth', apps.ForthCmd)
-os.addApp('forthc', apps.ForthCompilerCmd)
-os.addApp('magic', apps.MagicCmd)
-os.addApp('rmagic', apps.RemoteMagicCmd)
-os.addApp('scan', apps.ScanCmd)
-
-// add some icons
-
-os.addIcon('huh?', 'story')
-os.addIcon('manual', 'manual')
-os.addIcon('shell', 'shell')
-os.addIcon('radar', 'radar')
-os.addIcon('files', 'files')
-os.addIcon('editor', 'editor')
-
-// launch default apps
-
-os.launch('story')
+let theos = new os.Kernel(document.getElementById('main'), modules, defaultApps, defaultIcons)
 
 // put some things in the window for hacking around
 
-window.os = os
+window.os = theos
 window.lang = lang
 window.forth = function (src) {
   return lang.run(lang.parse(src)).res

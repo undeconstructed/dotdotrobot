@@ -4,55 +4,55 @@ import * as lang from './lang.js'
 
 export class StatusCmd {
   main () {
-    this.os.write(1, 'not good')
-    this.os.exit()
+    this.sys('write', 1, 'not good')
+    this.exit()
   }
 }
 
 export class CatCmd {
   main () {
-    this.os.read(0, 'in')
+    this.sys('read', 0, 'in')
   }
   wake (tag, data) {
     if (tag === 'in') {
       if (data === '') {
-        this.os.exit()
+        this.exit()
       } else {
-        this.os.write(1, `read: ${data}`)
-        this.os.read(0, 'in')
+        this.sys('write', 1, `read: ${data}`)
+        this.sys('read', 0, 'in')
       }
     } else if (tag === 'sig') {
-      this.os.write(1, `sig: ${data}`)
+      this.sys('write', 1, `sig: ${data}`)
     }
   }
 }
 
 export class EveryCmd {
   main () {
-    this.os.timeout(10, 'ping')
+    this.sys('timeout', 10, 'ping')
   }
   wake (tag, data) {
     if (tag === 'ping') {
-      this.os.write(1, `ping`)
-      this.os.timeout(10, 'ping')
+      this.sys('write', 1, `ping`)
+      this.sys('timeout', 10, 'ping')
     } else if (tag === 'sig') {
-      this.os.exit(0)
+      this.exit(0)
     }
   }
 }
 
 export class ForthCmd {
   main () {
-    this.os.read(0, 'in')
+    this.sys('read', 0, 'in')
   }
   wake (tag, data) {
     if (tag === 'in') {
       if (data === '') {
-        this.os.exit()
+        this.exit()
       } else {
         let res = this.run(data)
-        this.os.write(1, res)
-        this.os.read(0, 'in')
+        this.sys('write', 1, res)
+        this.sys('read', 0, 'in')
       }
     }
   }
@@ -69,34 +69,34 @@ export class ForthCompilerCmd {
   main () {
     let file = this.args[1]
     if (!file) {
-      this.os.write(1, `usage: ${this.args[0]} <file>`)
-      this.os.exit(1)
+      this.sys('write', 1, `usage: ${this.args[0]} <file>`)
+      this.exit(1)
     }
-    let data = this.os.readFile(file)
+    let data = this.sys('readFile', file)
     try {
       let res = lang.parse(data)
-      this.os.write(1, `binary: ${JSON.stringify(res)}`)
+      this.sys('write', 1, `binary: ${JSON.stringify(res)}`)
     } catch (e) {
-      this.os.write(1, `error: ${e}`)
+      this.sys('write', 1, `error: ${e}`)
     }
-    this.os.exit()
+    this.exit()
   }
 }
 
 export class MagicCmd {
   main () {
-    this.os.read(0, 'in')
+    this.sys('read', 0, 'in')
   }
   wake (tag, data) {
     if (tag === 'in') {
       if (data === '') {
-        this.os.exit()
+        this.exit()
       } else {
-        this.os.magic(data, 'res')
+        this.sys('magic', data, 'res')
       }
     } else if (tag === 'res') {
-      this.os.write(1, `rx: ${data}`)
-      this.os.read(0, 'in')
+      this.sys('write', 1, `rx: ${data}`)
+      this.sys('read', 0, 'in')
     }
   }
 }
@@ -105,49 +105,49 @@ export class RemoteMagicCmd {
   main () {
     let freq = this.args[1]
     if (!freq) {
-      this.os.write(1, `usage: ${this.args[0]} <frequency>`)
-      this.os.exit(1)
+      this.sys('write', 1, `usage: ${this.args[0]} <frequency>`)
+      this.exit(1)
     }
     this.counter = 1
-    this.streams = this.os.open([ 'radio', parseInt(freq) ])
-    this.os.read(0, 'in')
+    this.streams = this.sys('open', [ 'radio', parseInt(freq) ])
+    this.sys('read', 0, 'in')
   }
   wake (tag, data) {
     if (tag === 'in') {
       if (data === '') {
-        this.os.exit()
+        this.exit()
       } else {
         let toSend = {
           id: this.counter++,
           src: data
         }
-        this.os.write(this.streams.tx, JSON.stringify(toSend))
-        this.os.read(this.streams.rx, 'res')
+        this.sys('write', this.streams.tx, JSON.stringify(toSend))
+        this.sys('read', this.streams.rx, 'res')
       }
     } else if (tag === 'res') {
       let res = JSON.parse(data)
       if (res.id) {
-        this.os.write(1, `rx: ${res.id} (${res.typ}) ${res.val}`)
+        this.sys('write', 1, `rx: ${res.id} (${res.typ}) ${res.val}`)
       } else {
-        this.os.write(1, `??: ${data}`)
+        this.sys('write', 1, `??: ${data}`)
       }
-      this.os.read(0, 'in')
+      this.sys('read', 0, 'in')
     }
   }
 }
 
 export class ScanCmd {
   main () {
-    this.os.write(1, 'scanning...')
-    this.os.expect('seen', 'seen')
-    this.os.magic('`"seen" load "seen" return` "on-scan" compile "on-scan" eye-scan', 'res')
+    this.sys('write', 1, 'scanning...')
+    this.sys('expect', 'seen', 'seen')
+    this.sys('magic', '`"seen" load "seen" return` "on-scan" compile "on-scan" eye-scan', 'res')
   }
   wake (tag, data) {
     if (tag === 'res') {
-      this.os.write(1, `rx: ${data}`)
+      this.sys('write', 1, `rx: ${data}`)
     } else if (tag === 'seen') {
-      this.os.write(1, `rx: ${data}`)
-      this.os.exit()
+      this.sys('write', 1, `rx: ${data}`)
+      this.exit()
     }
   }
 }
@@ -157,39 +157,39 @@ export class Shell {
     this.prompt = '$ '
     this.commands = {
       'exit': () => {
-        this.os.exit()
+        this.exit()
       },
       'debug': () => {
         console.log(this)
         this.addLine('test ' + this)
       },
       'handles': () => {
-        this.addLine(this.os.getHandles())
+        this.addLine(this.sys('getHandle'))
       },
       'self': () => {
-        this.addLine(this.os.getSelf())
+        this.addLine(this.sys('getSelf'))
       },
       'time': () => {
-        this.addLine(this.os.getTime())
+        this.addLine(this.sys('getTime'))
       },
       'ls': () => {
-        let ls = this.os.listFiles()
+        let ls = this.sys('listFiles')
         for (let file of ls) {
           this.addLine(file)
         }
       },
       'read': (args) => {
-        let data = this.os.readFile(args[1])
+        let data = this.sys('readFile', args[1])
         this.addLine(data)
       },
       'ps': (args) => {
-        let data = this.os.listProcesses()
+        let data = this.sys('listProcesses')
         for (let p of data) {
           this.addLine(`${p.id} ${p.cmd}`)
         }
       },
       'kill': (args) => {
-        this.os.signal(parseInt(args[1]), parseInt(args[2]))
+        this.sys('signal', parseInt(args[1]), parseInt(args[2]))
       }
     }
   }
@@ -206,7 +206,7 @@ export class Shell {
         this.inputBox.value = ''
         // this wouldn't be allowed, because it's trying to make os calls from an event handler
         // this.onInput(i)
-        this.os.defer(() => this.onInput(i))
+        this.defer(() => this.onInput(i))
         this.inputBox.focus()
       }
     })
@@ -225,11 +225,11 @@ export class Shell {
     this.buttonBox = mkel('div', { classes: [ 'buttons' ] })
     let intButton = mkel('button', { text: 'int'} )
     intButton.addEventListener('click', (e) => {
-      this.os.defer(() => this.onInt())
+      this.defer(() => this.onInt())
     })
     let killButton = mkel('button', { text: 'kill'} )
     killButton.addEventListener('click', (e) => {
-      this.os.defer(() => this.onKill())
+      this.defer(() => this.onKill())
     })
     this.buttonBox.appendChild(intButton)
     this.buttonBox.appendChild(killButton)
@@ -238,9 +238,9 @@ export class Shell {
     body.appendChild(scroller)
     body.appendChild(this.buttonBox)
 
-    this.window = this.os.newWindow('console', 'shell', body)
-    this.os.moveWindow(this.window, 50, 50)
-    this.os.resizeWindow(this.window, 600, 400)
+    this.window = this.sys('newWindow', 'console', 'shell', body)
+    this.sys('moveWindow', this.window, 50, 50)
+    this.sys('resizeWindow', this.window, 600, 400)
   }
   focus () {
     this.inputLine.scrollIntoView()
@@ -254,7 +254,7 @@ export class Shell {
     if (this.proc) {
       this.addLine(i)
       // forward to the running app
-      this.os.write(this.proc.tx, i)
+      this.sys('write', this.proc.tx, i)
     } else {
       // try to launch an app
       let args = i.trim().split(/\s+/)
@@ -266,12 +266,12 @@ export class Shell {
   }
   onInt () {
     if (this.proc) {
-      this.os.signal(this.proc.id, 1)
+      this.sys('signal', this.proc.id, 1)
     }
   }
   onKill () {
     if (this.proc) {
-      this.os.signal(this.proc.id, 9)
+      this.sys('signal', this.proc.id, 9)
     }
   }
   run (i, args) {
@@ -279,12 +279,12 @@ export class Shell {
     if (cmd) {
       cmd(args)
     } else {
-      this.proc = this.os.launch(i, args)
+      this.proc = this.sys('launch', i, args)
       if (this.proc) {
         this.prompt0 = this.prompt
         this.setPrompt('')
         this.addLine('> launched ' + this.proc.id)
-        this.os.read(this.proc.rx, 'fromapp')
+        this.sys('read', this.proc.rx, 'fromapp')
       } else {
         this.addLine(`${i}: command not found`)
       }
@@ -296,18 +296,18 @@ export class Shell {
         this.onExit()
       } else {
         this.onOutput(data)
-        this.os.read(this.proc.rx, 'fromapp')
+        this.sys('read', this.proc.rx, 'fromapp')
       }
     } else if (tag === 'window_close') {
-      this.os.exit()
+      this.exit()
     }
   }
   onOutput (e) {
     this.addLine(e)
   }
   onExit () {
-    this.os.close(this.proc.tx)
-    this.os.close(this.proc.rx)
+    this.sys('close', this.proc.tx)
+    this.sys('close', this.proc.rx)
     this.addLine('> exited ' + this.proc.id)
     this.proc = null
     this.setPrompt(this.prompt0)
@@ -357,13 +357,13 @@ export class Hinter {
     this.view.appendChild(this.line)
     this.view.appendChild(buttons)
 
-    this.window = this.os.newWindow('hinter', 'story', this.view)
-    this.os.moveWindow(this.window, 100, 100)
-    this.os.resizeWindow(this.window, 400, 200)
+    this.window = this.sys('newWindow', 'hinter', 'story', this.view)
+    this.sys('moveWindow', this.window, 100, 100)
+    this.sys('resizeWindow', this.window, 400, 200)
   }
   wake (tag, data) {
     if (tag === 'window_close') {
-      this.os.exit()
+      this.exit()
     }
   }
 }
@@ -371,14 +371,14 @@ export class Hinter {
 export class StateViewer {
   main () {
     this.text = mkel('div', { text: 'not done' })
-    this.window = this.os.newWindow('viewer', 'state', this.text)
+    this.window = this.sys('newWindow', 'viewer', 'state', this.text)
   }
   update (e) {
     this.text.textContent = JSON.stringify(e.val, mapper, '  ')
   }
   wake (tag, data) {
     if (tag === 'window_close') {
-      this.os.exit()
+      this.exit()
     }
   }
 }
@@ -406,14 +406,14 @@ export class Radar {
       this.mouse = { x: e.offsetX, y: e.offsetY }
     })
 
-    this.window = this.os.newWindow('radar', 'radar', this.box)
-    this.os.moveWindow(this.window, 100, 100)
-    this.os.resizeWindow(this.window, 400, 400)
+    this.window = this.sys('newWindow', 'radar', 'radar', this.box)
+    this.sys('moveWindow', this.window, 100, 100)
+    this.sys('resizeWindow', this.window, 400, 400)
     this.centre()
     this.draw()
 
-    this.os.expect('seen', 'seen')
-    this.os.magic('`"seen" load "seen" return` "on-scan" compile "on-scan" eye-scan', 'res')
+    this.sys('expect', 'seen', 'seen')
+    this.sys('magic', '`"seen" load "seen" return` "on-scan" compile "on-scan" eye-scan', 'res')
   }
   centre () {
     this.canvas.scrollIntoView({ block: 'center', inline: 'center' })
@@ -546,7 +546,7 @@ export class Radar {
   wake (tag, data) {
     if (tag === 'window_close') {
       this.halt = true
-      this.os.exit()
+      this.exit()
     } else if (tag === 'seen') {
       this.update(['self', 0, 0, 5, 1, JSON.parse(data)])
     }
@@ -557,13 +557,13 @@ export class Manual {
   main () {
     this.text = mkel('div')
     this.text.textContent = 'manual'
-    this.window = this.os.newWindow('manual', 'manual', this.text)
-    this.os.moveWindow(this.window, 100, 100)
-    this.os.resizeWindow(this.window, 400, 400)
+    this.window = this.sys('newWindow', 'manual', 'manual', this.text)
+    this.sys('moveWindow', this.window, 100, 100)
+    this.sys('resizeWindow', this.window, 400, 400)
   }
   wake (tag, data) {
     if (tag === 'window_close') {
-      this.os.exit()
+      this.exit()
     }
   }
 }
