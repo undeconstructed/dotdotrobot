@@ -8,8 +8,6 @@ export class Lib {
   constructor () {
     this.cbs = new Map()
     this.cbCount = 0
-    this.windowMemory = mkel('div', { 'style': 'display: none' })
-    document.body.appendChild(this.windowMemory)
   }
   queue (task) {
     let id = 'cb-' + this.cbCount++
@@ -34,11 +32,20 @@ export class Lib {
   gets (tag) {
     this.sys('read', os.STDIN, tag)
   }
+  // setupWindowing () {
+  //   // XXX this is not removed on exit
+  //   this.windowMemory = mkel('div', { 'style': 'display: none' })
+  //   document.body.appendChild(this.windowMemory)
+  // }
   newWindow (title, clazz, body) {
-    let bodyId = random.id()
-    body.id = bodyId
-    this.windowMemory.appendChild(body)
-    let win = this.sys('newWindow', title, clazz, bodyId)
+    // if (!this.windowMemory) {
+    //   this.setupWindowing()
+    // }
+    // let bodyId = random.id()
+    // body.id = bodyId
+    // this.windowMemory.appendChild(body)
+    let win = this.sys('newWindow', title, clazz)
+    document.getElementById(win.bd).appendChild(body)
     return win.id
   }
 }

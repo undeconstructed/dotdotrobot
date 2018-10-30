@@ -454,12 +454,12 @@ export class Kernel {
     this.exitProcess(proc)
   }
   // window internals
-  createWindow (owner, clazz, title, bodyId) {
+  createWindow (owner, clazz, title) {
     let id = this.windowCounter++
     let w = {
       id: id,
       owner: owner.id,
-      // body: random.id(),
+      body: random.id(),
       x: 0,
       y: 0,
       w: 100,
@@ -495,11 +495,11 @@ export class Kernel {
       this.wakeProcess(this.getProcess(w.owner), 'window_close', id)
     })
 
-    // w.bodyBox.id = w.body
+    w.bodyBox.id = w.body
 
-    let body = document.getElementById(bodyId)
-    body.parentNode.removeChild(body)
-    w.bodyBox.appendChild(body)
+    // let body = document.getElementById(bodyId)
+    // body.parentNode.removeChild(body)
+    // w.bodyBox.appendChild(body)
 
     // this.enqueue(() => {
       this.element.appendChild(w.box)
