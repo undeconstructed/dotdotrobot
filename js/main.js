@@ -105,10 +105,7 @@ let WorldModule = {
     rx.d = 'rx'
     rx.freq = freq + 1
 
-    return {
-      tx: this.addStreamToProcess(proc, tx),
-      rx: this.addStreamToProcess(proc, rx)
-    }
+    return { tx, rx }
   }
 }
 

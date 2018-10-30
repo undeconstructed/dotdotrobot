@@ -1,6 +1,7 @@
 
 import { assert, mkel } from './util.js'
 import * as lang from './lang.js'
+import * as random from './random.js'
 
 export const STDIN = 0
 export const STDOUT = 1
@@ -121,7 +122,7 @@ export class Kernel {
     return proc.id
   }
   _getHandles (proc) {
-    return Array.from(proc.handles.keys()).join(' ')
+    return Array.from(proc.handles.keys())
   }
   // timer syscalls
   _setTimeout (proc, time, tag) {
@@ -136,7 +137,10 @@ export class Kernel {
   // window syscalls
   _newWindow (proc, clazz, title, body) {
     let w = this.createWindow(proc, clazz, title, body)
-    return w.id
+    return {
+      id: w.id,
+      bd: w.body
+    }
   }
   _moveWindow (proc, handle, x, y) {
     let win = this.getWindow(handle)
@@ -164,7 +168,13 @@ export class Kernel {
     let [proto, uri] = url
     let opener = this.protocols.get(proto)
     if (opener) {
-      return opener.apply(this, [ proc, uri ])
+      let s = opener.apply(this, [ proc, uri ])
+      if (s) {
+        return {
+          tx: this.addToProcess(proc, s.tx),
+          rx: this.addToProcess(proc, s.rx)
+        }
+      }
     }
     return null
   }
@@ -174,7 +184,7 @@ export class Kernel {
       throw new Error(`no stream ${handle}`)
     }
 
-    let s = this.getStream(sid)
+    let s = this.getStream(sid.id)
     return this.readStream(s, proc, tag)
   }
   _writeStream (proc, handle, data) {
@@ -183,7 +193,7 @@ export class Kernel {
       throw new Error(`no stream ${handle}`)
     }
 
-    let s = this.getStream(sid)
+    let s = this.getStream(sid.id)
     return this.writeStream(s, data)
   }
   _closeStream (proc, handle) {
@@ -192,7 +202,8 @@ export class Kernel {
       throw new Error(`no stream ${handle}`)
     }
 
-    let s = this.getStream(sid)
+    let s = this.getStream(sid.id)
+    proc.handles.delete(handle)
     return this.unlinkStream(s, proc)
   }
   // process syscalls
@@ -202,9 +213,12 @@ export class Kernel {
       return null
     }
 
+    this.linkStream(p.stdIn, proc)
+    this.linkStream(p.stdOut, proc)
+
     let id = p.process.id
-    let tx = this.addStreamToProcess(proc, p.stdIn)
-    let rx = this.addStreamToProcess(proc, p.stdOut)
+    let tx = this.addToProcess(proc, 'stream', p.stdIn.id)
+    let rx = this.addToProcess(proc, 'stream', p.stdOut.id)
 
     this.startProcess(p.process)
 
@@ -268,7 +282,7 @@ export class Kernel {
   }
   unlinkStream (stream, proc) {
     stream.procs.delete(proc.id)
-    if (stream.owner = proc.id) {
+    if (stream.owner === proc.id) {
       stream.open = false
       stream.owner = null
     }
@@ -290,7 +304,7 @@ export class Kernel {
   }
   // process internals
   createProcess (cmd, args) {
-    let appClass = this.apps[cmd]
+    let appClass = this.apps.get(cmd)
     if (!appClass) {
       return null
     }
@@ -321,8 +335,8 @@ export class Kernel {
     let stdIn = this.createStream(process)
     let stdOut = this.createStream(process)
 
-    this.addStreamToProcess(process, stdIn)
-    this.addStreamToProcess(process, stdOut)
+    this.addToProcess(process, 'stream', stdIn.id)
+    this.addToProcess(process, 'stream', stdOut.id)
 
     return { process, stdIn, stdOut }
   }
@@ -353,9 +367,9 @@ export class Kernel {
       return null
     }
 
-    const defer = (task) => {
+    const defer = (tag) => {
       // this is weirdly direct access into the OS, but the only way to connect JS signals etc
-      this.enqueueInProcess(p, task)
+      this._setTimeout(p, 0, tag)
     }
 
     const exit = () => {
@@ -372,11 +386,21 @@ export class Kernel {
       p.app.main()
     })
   }
-  addStreamToProcess (p, stream) {
-    this.linkStream(stream, p)
+  addToProcess (p, type, id) {
     let handle = p.handleCounter++
-    p.handles.set(handle, stream.id)
+    p.handles.set(handle, {
+      type: type,
+      id: id
+    })
     return handle
+  }
+  removeFromProcess (p, type, id) {
+    for (let [h, l] of p.handles) {
+      if (l.type === type && l.id === id) {
+        p.handles.remove(h)
+        return
+      }
+    }
   }
   tickProcess (p) {
     let task = p.tasks.shift()
@@ -398,7 +422,7 @@ export class Kernel {
     proc.running = false
     if (proc.id) {
       for (let [id, sid] of proc.handles) {
-        let s = this.streams.get(sid)
+        let s = this.streams.get(sid.id)
         this.unlinkStream(s, proc)
       }
       for (let [id, w] of this.windows) {
@@ -430,12 +454,12 @@ export class Kernel {
     this.exitProcess(proc)
   }
   // window internals
-  createWindow (owner, clazz, title, body) {
+  createWindow (owner, clazz, title) {
     let id = this.windowCounter++
     let w = {
       id: id,
       owner: owner.id,
-      body: null,
+      body: random.id(),
       x: 0,
       y: 0,
       w: 100,
@@ -471,7 +495,7 @@ export class Kernel {
       this.wakeProcess(this.getProcess(w.owner), 'window_close', id)
     })
 
-    this.setWindowBody(w, body)
+    w.bodyBox.id = w.body
 
     // this.enqueue(() => {
       this.element.appendChild(w.box)
@@ -520,14 +544,6 @@ export class Kernel {
     this.element.removeChild(w.box)
     // TODO - handle topWindow
   }
-  setWindowBody (win, element) {
-    if (win.body) {
-      win.bodyBox.replaceChild(element, win.body)
-    } else {
-      win.bodyBox.appendChild(element)
-    }
-    win.body = element
-  }
   signal (proc, tgt, sig) {
     tgt = this.getProcess(tgt)
     if (sig === 9) {
@@ -538,7 +554,7 @@ export class Kernel {
   }
   // internals
   addApp (cmd, app) {
-    this.apps[cmd] = app
+    this.apps.set(cmd, app)
   }
   addIcon (label, cmd) {
     let iconCore = mkel('div', { text: label })

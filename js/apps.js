@@ -4,11 +4,37 @@ import * as lang from './lang.js'
 import * as os from './os.js'
 
 export class Lib {
+  constructor () {
+    this.cbs = new Map()
+    this.cbCount = 0
+  }
+  queue (task) {
+    let id = 'cb-' + this.cbCount++
+    this.cbs.set(id, task)
+    this.defer(id)
+  }
+  wake (tag, data) {
+    let t = this.cbs.get(tag)
+    if (t) {
+      this.cbs.delete(tag)
+      t(data)
+    }
+  }
   print (line) {
     this.sys('write', os.STDOUT, line)
   }
+  read (cb) {
+    let id = 'cb-' + this.cbCount++
+    this.cbs.set(id, t)
+    this.sys('read', os.STDIN, id)
+  }
   gets (tag) {
     this.sys('read', os.STDIN, tag)
+  }
+  newWindow (title, clazz, body) {
+    let win = this.sys('newWindow', title, clazz)
+    document.getElementById(win.bd).appendChild(body)
+    return win.id
   }
 }
 
@@ -23,7 +49,12 @@ export class CatCmd extends Lib {
   main () {
     this.gets('in')
   }
+  loop () {
+    this.read()
+  }
   wake (tag, data) {
+    super.wake(tag, data)
+
     if (tag === 'in') {
       if (data === '') {
         this.exit()
@@ -179,7 +210,7 @@ export class Shell extends Lib {
         this.addLine('test ' + this)
       },
       'handles': () => {
-        this.addLine(this.sys('getHandle'))
+        this.addLine(this.sys('getHandles').join(' '))
       },
       'self': () => {
         this.addLine(this.sys('getSelf'))
@@ -221,7 +252,7 @@ export class Shell extends Lib {
         this.inputBox.value = ''
         // this wouldn't be allowed, because it's trying to make os calls from an event handler
         // this.onInput(i)
-        this.defer(() => this.onInput(i))
+        this.queue(() => this.onInput(i))
         this.inputBox.focus()
       }
     })
@@ -240,11 +271,11 @@ export class Shell extends Lib {
     this.buttonBox = mkel('div', { classes: [ 'buttons' ] })
     let intButton = mkel('button', { text: 'int'} )
     intButton.addEventListener('click', (e) => {
-      this.defer(() => this.onInt())
+      this.queue(() => this.onInt())
     })
     let killButton = mkel('button', { text: 'kill'} )
     killButton.addEventListener('click', (e) => {
-      this.defer(() => this.onKill())
+      this.queue(() => this.onKill())
     })
     this.buttonBox.appendChild(intButton)
     this.buttonBox.appendChild(killButton)
@@ -253,7 +284,7 @@ export class Shell extends Lib {
     body.appendChild(scroller)
     body.appendChild(this.buttonBox)
 
-    this.window = this.sys('newWindow', 'console', 'shell', body)
+    this.window = this.newWindow('console', 'shell', body)
     this.sys('moveWindow', this.window, 50, 50)
     this.sys('resizeWindow', this.window, 600, 400)
   }
@@ -306,6 +337,7 @@ export class Shell extends Lib {
     }
   }
   wake (tag, data) {
+    super.wake(tag, data)
     if (tag === 'fromapp') {
       if (data === 0) {
         this.onExit()
@@ -373,7 +405,7 @@ export class Hinter extends Lib {
     this.view.appendChild(this.line)
     this.view.appendChild(buttons)
 
-    this.window = this.sys('newWindow', 'hinter', 'story', this.view)
+    this.window = this.newWindow('hinter', 'story', this.view)
     this.sys('moveWindow', this.window, 100, 100)
     this.sys('resizeWindow', this.window, 400, 200)
   }
@@ -387,7 +419,7 @@ export class Hinter extends Lib {
 export class StateViewer extends Lib {
   main () {
     this.text = mkel('div', { text: 'not done' })
-    this.window = this.sys('newWindow', 'viewer', 'state', this.text)
+    this.window = this.newWindow('viewer', 'state', this.text)
   }
   update (e) {
     this.text.textContent = JSON.stringify(e.val, mapper, '  ')
@@ -423,7 +455,7 @@ export class Radar extends Lib {
       this.mouse = { x: e.offsetX, y: e.offsetY }
     })
 
-    this.window = this.sys('newWindow', 'radar', 'radar', this.box)
+    this.window = this.newWindow('radar', 'radar', this.box)
     this.sys('moveWindow', this.window, 100, 100)
     this.sys('resizeWindow', this.window, 400, 400)
     this.centre()
@@ -574,7 +606,7 @@ export class Manual extends Lib {
   main () {
     this.text = mkel('div')
     this.text.textContent = 'manual'
-    this.window = this.sys('newWindow', 'manual', 'manual', this.text)
+    this.window = this.newWindow('manual', 'manual', this.text)
     this.sys('moveWindow', this.window, 100, 100)
     this.sys('resizeWindow', this.window, 400, 400)
   }
