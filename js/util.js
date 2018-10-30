@@ -70,7 +70,7 @@ export function mkel(tag, opts) {
     e.classList.add(...opts.classes)
   }
   if (opts.style) {
-    e.style = style
+    e.style = opts.style
   }
   if (opts.text) {
     e.textContent = opts.text

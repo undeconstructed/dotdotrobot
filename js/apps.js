@@ -2,11 +2,14 @@
 import { mkel } from './util.js'
 import * as lang from './lang.js'
 import * as os from './os.js'
+import * as random from './random.js'
 
 export class Lib {
   constructor () {
     this.cbs = new Map()
     this.cbCount = 0
+    this.windowMemory = mkel('div', { 'style': 'display: none' })
+    document.body.appendChild(this.windowMemory)
   }
   queue (task) {
     let id = 'cb-' + this.cbCount++
@@ -32,8 +35,10 @@ export class Lib {
     this.sys('read', os.STDIN, tag)
   }
   newWindow (title, clazz, body) {
-    let win = this.sys('newWindow', title, clazz)
-    document.getElementById(win.bd).appendChild(body)
+    let bodyId = random.id()
+    body.id = bodyId
+    this.windowMemory.appendChild(body)
+    let win = this.sys('newWindow', title, clazz, bodyId)
     return win.id
   }
 }
