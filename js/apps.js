@@ -20,7 +20,7 @@ export class Lib {
     let t = this.cbs.get(tag)
     if (t) {
       this.cbs.delete(tag)
-      t(data)
+      t.call(this, data)
     }
   }
   print (line) {
@@ -28,7 +28,7 @@ export class Lib {
   }
   read (cb) {
     let id = 'cb-' + this.cbCount++
-    this.cbs.set(id, t)
+    this.cbs.set(id, cb)
     this.sys('read', os.STDIN, id)
   }
   gets (tag) {
@@ -52,22 +52,19 @@ export class StatusCmd extends Lib {
 
 export class CatCmd extends Lib {
   main () {
-    this.gets('in')
+    this.read(this.loop)
   }
-  loop () {
-    this.read()
+  loop (data) {
+    if (data === '') {
+      this.exit()
+    }
+    this.print(`read: ${data}`)
+    this.read(this.loop)
   }
   wake (tag, data) {
     super.wake(tag, data)
 
-    if (tag === 'in') {
-      if (data === '') {
-        this.exit()
-      } else {
-        this.print(`read: ${data}`)
-        this.gets('in')
-      }
-    } else if (tag === 'sig') {
+    if (tag === 'sig') {
       this.print(`sig: ${data}`)
     }
   }
