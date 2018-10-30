@@ -695,7 +695,7 @@ class RadarSimpleComponent extends SimpleComponent {
   }
   _scan (args) {
     let o = this.core.scan(this.owner)
-    this.owner.machine.setVariable("seen", JSON.stringify(o))
+    this.owner.machine.setVariable('seen', JSON.stringify(o))
     // this.owner.command({ src: `"seen" load "seen" list-from-json ${args.hook}` })
     this.owner.command({ src: `${args.hook}` })
   }

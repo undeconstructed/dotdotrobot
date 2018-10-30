@@ -21,38 +21,38 @@ export class Kernel {
   boot () {
     this.tasks = []
     this.streams = new Map()
-    this.streamCounter = this.streams.size
+    this.streamCounter = 0
     this.processes = new Map()
-    this.processCounter = 1
+    this.processCounter = 0
     this.windows = new Map()
-    this.windowCounter = 1
+    this.windowCounter = 0
     this.topWindow = null
     this.timeouts = new Map()
-    this.timeoutCounter = 1
+    this.timeoutCounter = 0
     // default syscalls
     this.syscalls = new Map([
-      [ "getTime", this._getTime ],
-      [ "getSelf", this._getSelf ],
-      [ "getHandles", this._getHandles ],
-      [ "open", this._openStream ],
-      [ "read", this._readStream ],
-      [ "write", this._writeStream ],
-      [ "close", this._closeStream ],
+      [ 'getTime', this._getTime ],
+      [ 'getSelf', this._getSelf ],
+      [ 'getHandles', this._getHandles ],
+      [ 'open', this._openStream ],
+      [ 'read', this._readStream ],
+      [ 'write', this._writeStream ],
+      [ 'close', this._closeStream ],
       [ 'signal', this._signalProcess ],
-      [ "launch", this._launchProcess ],
-      [ "listFiles", this._listFiles ],
-      [ "writeFile", this._writeFile ],
-      [ "readFile", this._readFile ],
-      [ "deleteFile", this._deleteFile ],
-      [ "newWindow", this._newWindow ],
-      [ "moveWindow", this._moveWindow ],
-      [ "resizeWindow", this._resizeWindow ],
-      [ "closeWindow", this._closeWindow ],
-      [ "listProcesses", this._listProcesses ],
-      [ "timeout", this._setTimeout ]
+      [ 'launch', this._launchProcess ],
+      [ 'listFiles', this._listFiles ],
+      [ 'writeFile', this._writeFile ],
+      [ 'readFile', this._readFile ],
+      [ 'deleteFile', this._deleteFile ],
+      [ 'newWindow', this._newWindow ],
+      [ 'moveWindow', this._moveWindow ],
+      [ 'resizeWindow', this._resizeWindow ],
+      [ 'closeWindow', this._closeWindow ],
+      [ 'listProcesses', this._listProcesses ],
+      [ 'timeout', this._setTimeout ]
     ])
     this.protocols = new Map([
-      [ "file", this._openFile ]
+      [ 'file', this._openFile ]
     ])
     // console
     this.console = mkel('div', { classes: [ 'console' ] })
@@ -105,10 +105,12 @@ export class Kernel {
     }
 
     this.log(`${proc.id} ${name} ${args}`)
-    let r = sc.apply(this, [proc, ...args])
-    if (r !== undefined) {
-      this.log(`=> ${r}`)
+    let r = sc.apply(this, [proc, ...JSON.parse(args)])
+    if (r === undefined || r === null) {
+      return null
     }
+    r = JSON.stringify(r)
+    this.log(`=> ${r}`)
     return r
   }
   // misc syscalls
@@ -341,10 +343,14 @@ export class Kernel {
       if (!p.inside) {
         throw NOT_INSIDE
       }
+      args = args || []
       // console.log('syscall', p.id, name, args)
-      let r = this.syscall(p.id, name, args)
+      let r = this.syscall(p.id, name, JSON.stringify(args))
       // console.log('=>', r)
-      return r
+      if (r) {
+        return JSON.parse(r)
+      }
+      return null
     }
 
     const defer = (task) => {
