@@ -171,8 +171,8 @@ export class Kernel {
       let s = opener.apply(this, [ proc, uri ])
       if (s) {
         return {
-          tx: this.addToProcess(proc, s.tx),
-          rx: this.addToProcess(proc, s.rx)
+          tx: this.addToProcess(proc, 'stream', s.tx.id),
+          rx: this.addToProcess(proc, 'stream', s.rx.id)
         }
       }
     }
